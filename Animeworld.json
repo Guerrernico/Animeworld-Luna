@@ -1,0 +1,19 @@
+{
+  "sourceName": "Animeworld",
+  "iconUrl": "https://github.com/Guerrernico/Animeworld--Luna/raw/branch/main/modules/aniworld/aniworld.png",
+  "author": {
+    "name": "Guerrernico",
+    "icon": "https://files.catbox.moe/ttj4fc.gif",
+    "url": "https://github.com/JMcrafter26"
+  },
+  "version": "1.0.0",
+  "language": "Italiano (SUB)",
+  "streamType": "HLS",
+  "quality": "1080p",
+  "baseUrl": "https://www.animeworld.ac",
+  "searchBaseUrl": "https://www.animeworld.ac/search?keyword=%s",
+  "scriptUrl": "https://github.com/Guerrernico/Animeworld--Luna/raw/branch/main/Animeworld.js",
+  "type": "anime",
+  "downloadSupport": true,
+  "asyncJS": true
+}
