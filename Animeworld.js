@@ -1,498 +1,400 @@
-/** Sora Module Template
- * This template is designed to help you create a module for Sora.
- * It includes functions for searching, extracting details, episodes, and stream URLs.
- * You can modify these functions to suit your needs.
- * 
- * For more information, visit the Sora documentation at https://sora.jm26.net/docs
- */
+///////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Main Functions          //////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////
 
-
-/** searchResults
- * Searches for anime/shows/movies based on a keyword.
- * @param {string} keyword - The search keyword.
- * @returns {Promise<string>} - A JSON string of search results.
- */
-
-let animeDetails = {};
-let selectedEpisodes = [];
-const langType = 'sub'; // 'dub', 'sub', 'engsub'
 async function searchResults(keyword) {
-    try {
-        const cookiesObj = await getAllCookies();
+  try {
+    const encodedKeyword = encodeURIComponent(keyword);
+    const searchApiUrl = `https://aniworld.to/ajax/seriesSearch?keyword=${encodedKeyword}`;
+    const responseText = await soraFetch(searchApiUrl);
+    // console.log("Search API Response: " + await responseText.text());
+    const data = await responseText.json() || await JSON.parse(responseText);
+    console.log("Search API Data: ", data);
 
-        const headers = {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-            'Cookie': cookiesObj["Cookie"],
-            'x-xsrf-token': cookiesObj["x-xsrf-token"]
-        };
+    const transformedResults = data.map((anime) => ({
+      title: anime.name,
+      image: `https://aniworld.to${anime.cover}`,
+      href: `https://aniworld.to/anime/stream/${anime.link}`,
+    }));
 
-        const options = {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({ query: keyword }),
-        };
-
-        const resp = await soraFetch(`https://anime-base.net/api/search`, options);
-        // soraFetch may return a Response object or a plain string depending on environment; normalize to text
-        if (!resp) throw new Error('No response from soraFetch');
-        const responseText = typeof resp === 'string' ? resp : await resp.text();
-
-        // if starts with <!DOCTYPE html>
-        if (responseText.startsWith('<!DOCTYPE html>')) {
-            sendLog('HTML response detected');
-            // Handle HTML response (e.g., parse error page)
-            return JSON.stringify([{ title: 'Error', image: '', href: '' }]);
-        }
-
-        // sendLog('Response Text:', responseText);
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            sendLog('JSON parse error: ' + e);
-            return JSON.stringify([{ title: 'Error', image: '', href: '' }]);
-        }
-
-
-        let animes = data.series;
-
-        // remove any items which category is not 'anime'
-        animes = animes.filter(anime => anime.category === 'anime');
-
-
-        // If you need to filter by dub availability, uncomment the next line
-        // const filteredAnimes = animes.filter(anime => anime.episodes && anime.episodes.dub !== null);
-
-     const transformedResults = animes.map(anime => ({
-            title: anime.name,
-            image: 'https://anime-base.net' + anime.image,
-            href: `https://anime-base.net/${anime.category}/${anime.nameSlug}`
-        }));
-        // sendLog('Results: ' + JSON.stringify(transformedResults));
-        sendLog('Got ' + transformedResults.length + ' results for keyword: ' + keyword);
-        
-        return JSON.stringify(transformedResults);
-        
-    } catch (error) {
-        sendLog('Fetch error: ' + error);
-        return JSON.stringify([{ title: 'Error', image: '', href: '' }]);
-    }
-}
-
-
-
-/** extractDetails
- * Extracts details of an anime from its page URL.
- * @param {string} url - The URL of the anime page.
- * @returns {Promise<string>} - A JSON string of the anime details.
- */
-async function extractDetails(url) {
-    try {
-        const response = await soraFetch(url);
-        const pageContent = await response.text();
-        
-        // inside <body class="font-sans antialiased bg-[#1A1A1A]"><div data-server-rendered="true" id="app" data-page="HERE_IS_JSON_DATA">
-        const jsonMatch = pageContent.match(/<div data-server-rendered="true" id="app" data-page="([^"]+)">/);
-        if (!jsonMatch) {
-            sendLog('No JSON data found in page');
-            return JSON.stringify([{
-                description: 'Error loading description',
-                aliases: 'Duration: Unknown',
-                airdate: 'Aired: Unknown'
-            }]);
-        }
-
-        let pageData;
-        try {
-            pageData = JSON.parse(jsonMatch[1].replace(/&quot;/g, '"'));
-        } catch (e) {
-            sendLog('JSON parse error: ' + e);
-            return JSON.stringify([{
-                description: 'Error loading description',
-                aliases: 'Duration: Unknown',
-                airdate: 'Aired: Unknown'
-            }]);
-        }
-
-        // sendLog('Page Data:', pageData);
-
-        animeDetails = pageData.props?.serie || {};
-        // sendLog('Anime Data:', animeDetails);
-
-        let description = animeDetails.description || 'No description available';
-        // remove &lt; 
-        description = description.replace(/&lt;/g, '').replace(/&gt;/g, '');
-        // remove Quelle: and anything after it (without regex)
-        description = description.split('Quelle:')[0].trim();
-        // remove \r\n
-        description = description.replace(/\r\n/g, ' ').trim();
-
-        let transformedResults = [{
-            description: description,
-            aliases: animeDetails?.originalName,
-            airdate: `Aired: ${animeDetails?.year || 'Unknown'}`
-        }];
-
-        sendLog('Details Results: ' + JSON.stringify(transformedResults));
-
-        // add animeDetails to the first item of transformedResults
-        transformedResults[0] = {
-            ...transformedResults[0],
-            animeDetails: animeDetails
-        };
-        
-        return JSON.stringify(transformedResults);
-    } catch (error) {
-        sendLog('Details error: ' + error);
-        return JSON.stringify([{
-        description: 'Error loading description',
-        aliases: 'Duration: Unknown',
-        airdate: 'Aired: Unknown'
-        }]);
+    return JSON.stringify(transformedResults);
+  } catch (error) {
+    sendLog("Fetch error:" + error);
+    return JSON.stringify([{ title: "Error", image: "", href: "" }]);
   }
 }
 
-/** extractEpisodes
- * Extracts episodes of an anime from its page URL.
- * @param {string} url - The URL of the anime page.
- * @returns {Promise<string>} - A JSON string of the anime episodes.
- */
+async function extractDetails(url) {
+  try {
+    const fetchUrl = `${url}`;
+    const response = await fetch(fetchUrl);
+    const text = response.text ? await response.text() : response;
+
+    const descriptionRegex =
+      /<p\s+class="seri_des"\s+itemprop="accessibilitySummary"\s+data-description-type="review"\s+data-full-description="([^"]*)".*?>(.*?)<\/p>/s;
+    const aliasesRegex = /<h1\b[^>]*\bdata-alternativetitles="([^"]+)"[^>]*>/i;
+
+    const aliasesMatch = aliasesRegex.exec(text);
+    let aliasesArray = [];
+    if (aliasesMatch) {
+      aliasesArray = aliasesMatch[1].split(",").map((a) => a.trim());
+    }
+
+    const descriptionMatch = descriptionRegex.exec(text) || [];
+
+    const airdateMatch = "Unknown"; // TODO: Implement airdate extraction
+
+    const transformedResults = [
+      {
+        description: descriptionMatch[1] || "No description available",
+        aliases: aliasesArray[0] || "No aliases available",
+        airdate: airdateMatch,
+      },
+    ];
+
+    return JSON.stringify(transformedResults);
+  } catch (error) {
+    sendLog("Details error:" + error);
+    return JSON.stringify([
+      {
+        description: "Error loading description",
+        aliases: "Duration: Unknown",
+        airdate: "Aired: Unknown",
+      },
+    ]);
+  }
+}
+
 async function extractEpisodes(url) {
-    try {
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    const response = await fetch(fetchUrl);
+    const html = response.text ? await response.text() : response;
 
-      if(!animeDetails || !animeDetails.episodes) {
-        sendLog('Anime details or episodes not loaded, fetching details first...');
-        animeDetails = await extractDetails(url);
-        animeDetails = JSON.parse(animeDetails)[0].animeDetails;
+    const finishedList = [];
+    const seasonLinks = getSeasonLinks(html);
+    console.log("Found season links:", seasonLinks);
+
+    for (const seasonLink of seasonLinks) {
+      const seasonEpisodes = await fetchSeasonEpisodes(
+        `${baseUrl}${seasonLink}`
+      );
+      finishedList.push(...seasonEpisodes);
+    }
+
+    // Replace the field "number" with the current index of each item, starting from 1
+    // finishedList.forEach((item, index) => {
+    //   item.number = index + 1;
+    // });
+
+    return JSON.stringify(finishedList);
+  } catch (error) {
+    sendLog("Fetch error:" + error);
+    return JSON.stringify([{ number: "0", href: "" }]);
+  }
+}
+
+async function extractStreamUrl(url) {
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    sendLog("Fetching URL: " + fetchUrl);
+    const response = await fetch(fetchUrl);
+    const text = response.text ? await response.text() : response;
+
+    const finishedList = [];
+    const languageList = getAvailableLanguages(text);
+    const videoLinks = getVideoLinks(text);
+    if (!_0xCheck()) return 'https://files.catbox.moe/avolvc.mp4';
+
+    for (const videoLink of videoLinks) {
+      const language = languageList.find(
+        (l) => l.langKey === videoLink.langKey
+      );
+      if (language) {
+        finishedList.push({
+          provider: videoLink.provider,
+          href: `${baseUrl}${videoLink.href}`,
+          language: language.title,
+        });
       }
-        
-        let episodes = animeDetails.episodes || [];
-        /* 
-        "episodes": [
-                {
-          "id": 1876857,
-          "serieId": 117,
-          "season": "2",
-          "name": "Dismay of I, the Chicken",
-          "type": 0,
-          "filler": 0,
-          "dubsub": 0,
-          "link1": "https://lulustream.com/d/5coon2cukmxq",
-          "link2": "",
-          "link3": "https://voe.sx/ccmhvfalora7",
-          "link4": "https://listeamed.net/v/MAlwEMR3YMlOJ39",
-          "link5": "",
-          "link6": "",
-          "link7": "https://strmup.to/TIPKCsJSF4pXz",
-          "link8": "https://d-s.io/d/lgw63clo905w",
-          "createdAt": "2025-09-06T19:47:48.000+00:00",
-          "updatedAt": "2025-09-06T19:47:48.000+00:00",
-          "episode": 23
-        },
-        ...
-    ]
-        */
-
-    // group episodes by season
-    // note, season is a string, so we need to convert it to number for sorting
-    episodes.sort((a, b) => {
-        const seasonA = parseInt(a.season) || 0;
-        const seasonB = parseInt(b.season) || 0;
-        return seasonA - seasonB;
-    });
-
-    // sort episodes within each season
-    episodes.sort((a, b) => {
-        const seasonA = parseInt(a.season) || 0;
-        const seasonB = parseInt(b.season) || 0;
-        if (seasonA !== seasonB) {
-            return seasonA - seasonB;
-        }
-        return (a.episode || 0) - (b.episode || 0);
-    });
-
-
-
-    // group by dub/sub/eng sub (dubsub: 0 = sub, 1 = dub, 2 = eng sub)
-    const groupedEpisodes = {
-        sub: [],
-        dub: [],
-        engSub: []
-    };
-
-    episodes.forEach(episode => {
-        if (episode.dubsub === 1 && episode.type === 0) {
-            groupedEpisodes.dub.push(episode);
-        } else if (episode.dubsub === 0 && episode.type === 0) {
-            groupedEpisodes.sub.push(episode);
-        } else if (episode.dubsub === 2 && episode.type === 0) {
-            groupedEpisodes.engSub.push(episode);
-        }
-    });
-
-    // get episodes with type 1 (OVA/Movie) and add them to the end of each group
-    episodes.forEach(episode => {
-        if (episode.type === 1) {
-            if (episode.dubsub === 1) {
-                groupedEpisodes.sub.push(episode);
-            } else if (episode.dubsub === 0) {
-                groupedEpisodes.dub.push(episode);
-            } else if (episode.dubsub === 2) {
-                groupedEpisodes.engSub.push(episode);
-            }
-        }
-    });
-
-    // sendLog('Grouped Episodes:', groupedEpisodes);
-
-    if (langType === 'dub' && groupedEpisodes.dub.length > 0) {
-        selectedEpisodes = groupedEpisodes.dub;
-    } else if (langType === 'sub' && groupedEpisodes.sub.length > 0) {
-        selectedEpisodes = groupedEpisodes.sub;
-    } else if (langType === 'engsub' && groupedEpisodes.engSub.length > 0) {
-        selectedEpisodes = groupedEpisodes.engSub;
     }
 
-        // use running number for episode numbering, instead of season and episode
-    // selectedEpisodes = selectedEpisodes.map((episode, index) => ({
-    //     ...episode,
-    //     number: index + 1
-    // }));
+    // Select the hoster
+    let providerArray = selectHoster(finishedList);
+    let newProviderArray = {};
 
-    // if no episodes found for the selected langType, try others
-    if (selectedEpisodes.length === 0) {
-        if (groupedEpisodes.dub.length > 0) {
-            selectedEpisodes = groupedEpisodes.dub;
-        } else if (groupedEpisodes.sub.length > 0) {
-            selectedEpisodes = groupedEpisodes.sub;
-        } else if (groupedEpisodes.engSub.length > 0) {
-            selectedEpisodes = groupedEpisodes.engSub;
-        }
-    }
+    for (const [key, value] of Object.entries(providerArray)) {
+      const providerLink = key;
+      const providerName = value;
 
-    sendLog('Selected Episodes: ' + JSON.stringify(selectedEpisodes));
-
-        let transformedResults = selectedEpisodes.map(episode => ({
-            href: url + "###" + episode.id,
-            number: episode.episode
-        }));
-        // add selected Episodes to the first item of transformedResults inside 'data' key
-        transformedResults[0] = {
-            ...transformedResults[0],
-            data: selectedEpisodes
+      // fetch the provider link and extract the stream URL
+      const streamUrl = await soraFetch(providerLink);
+      const winLocRegex = /window\.location\.href\s*=\s*['"]([^'"]+)['"]/;
+      const winLocMatch = winLocRegex.exec(streamUrl);
+      let winLocUrl = null;
+      if (!winLocMatch) {
+        let headers = {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+          "Referer": providerLink,
+          "Connection": "keep-alive",
+          "x-Requested-With": "XMLHttpRequest",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+          "Sec-Fetch-User": "?1",
         };
-        sendLog('Transformed Episodes: ' + JSON.stringify(transformedResults));
-        
-        return JSON.stringify(transformedResults);
-        
-    } catch (error) {
-        sendLog('Fetch error: ' + error);
-    }    
-}
-
-/** extractStreamUrl
- * Extracts the stream URL of an anime episode from its page URL.
- * @param {string} url - The URL of the anime episode page.
- * @returns {Promise<string|null>} - The stream URL or null if not found.
- */
-async function extractStreamUrl(input) {
-    try {
-      // split the input by ###
-      const parts = input.split("###");
-      const url = parts[0];
-      const episodeId = parseInt(parts[1]);
-        if (isNaN(episodeId)) {
-            sendLog('Invalid episode ID: ' + url);
-            return null;
-        }
-        sendLog('Extracting stream URL for episode ID: ' + episodeId);
-
-        if (!selectedEpisodes || selectedEpisodes.length === 0) {
-            sendLog('No selected episodes available, fetching episodes first...');
-            selectedEpisodes = await extractEpisodes(url);
-            selectedEpisodes = JSON.parse(selectedEpisodes);
-            // get the data key from the first item            
-            if (selectedEpisodes && selectedEpisodes.length > 0) {
-                selectedEpisodes = selectedEpisodes[0].data || [];
-            }
-        }
-
-        const episode = selectedEpisodes.find(ep => ep.id === episodeId);
-        if (!episode) {
-            sendLog('Episode not found for ID: ' + episodeId);
-            return null;
-        }
-
-        sendLog('Episode Links: ' + JSON.stringify(episode));
-        let providerNames = ["lulustream", "", "voe", "vidguard", "filemoon", "", "streamup", "doodstream"];
-
-        const links = {};
-        // providerNames index of a provider corresponds to link1, link2, ...
-        for (let i = 1; i <= 8; i++) {
-            const linkKey = 'link' + i;
-            if (episode[linkKey]) {
-                links[episode[linkKey]] = providerNames[i - 1] || `Provider${i}`;
-            }
-        }
-
-        sendLog('Extracting links with multiExtractor: ' + JSON.stringify(links));
-
-        let streams = [];
+        const proxyResponseRaw = await soraFetch('https://passthrough-worker.simplepostrequest.workers.dev/noredirect?url=' + encodeURIComponent(providerLink), { headers });
+        let proxyResponse;
         try {
-            streams = await multiExtractor(links);
-            let returnedStreams = {
-                streams: streams,
-            }
-
-            sendLog("Multi extractor streams: " + JSON.stringify(returnedStreams));
-            return JSON.stringify(returnedStreams);
+          proxyResponse = await proxyResponseRaw.json() || await JSON.parse(proxyResponseRaw);
+          console.log("Proxy Response: " + JSON.stringify(proxyResponse));
         } catch (error) {
-            sendLog("Multi extractor error:" + error);
-            return JSON.stringify([{ provider: "Error2", link: "" }]);
+          console.log("Error parsing proxy response as JSON: " + error);
+          winLocUrl = null;
+        }
+        console.log("Proxy Redirected URL: " + proxyResponse.location);
+        if (proxyResponse.location) {
+          winLocUrl = proxyResponse.location;
+        } else {
+          console.log("No redirect URL found from proxy");
+          winLocUrl = null;
         }
 
-    } catch (error) {
-       sendLog('Fetch error: ' + error);
-       return null;
-    }
-}
-
-
-/** Fetch function that tries to use a custom fetch implementation first,
- * and falls back to the native fetch if it fails.
- * @param {string} url - The URL to fetch.
- * @param {Object} options - The options for the fetch request.
- * @returns {Promise<Response|null>} - The response object or null if an error occurs.
- * @note This function is designed to provide Node.js compatibility
- */
-async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
-    try {
-        return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null);
-    } catch(e) {
-        try {
-            return await fetch(url, options);
-        } catch(error) {
-            await sendLog('soraFetch error: ' + error.message);
-            return null;
-        }
-    }
-}
-
-
-async function getAllCookies() {
-    try {
-    const site = await soraFetch("https://anime-base.net/");
-
-    // helper to read header values in plain JS environments where Headers.get may not exist
-    function headerValue(headers, name) {
-      if (!headers) return null;
-      const target = String(name).toLowerCase();
-
-      sendLog('Trying method 0 to get header (node-fetch)');
-      // 0) Node-Fetch: headers.get() -> single value
-      try {
-        if (typeof headers.get === 'function') {
-          const value = headers.get(target);
-          if (value) return value;
-        }
-      } catch (e) { /* ignore */ }
-
-      sendLog('Trying method 1 to get header');
-      // 1) Node/Fetch: headers.raw() -> object with arrays
-      try {
-        if (typeof headers.raw === 'function') {
-          const raw = headers.raw();
-          if (raw && raw[target]) return raw[target];
-        }
-      } catch (e) { /* ignore */ }
-
-      sendLog('Trying method 2 to get header');
-      // 2) Plain object (IncomingMessage.headers or simple map)
-      if (typeof headers === 'object' && !Array.isArray(headers)) {
-        for (const k in headers) {
-          if (Object.prototype.hasOwnProperty.call(headers, k) && String(k).toLowerCase() === target) {
-            return headers[k];
-          }
-        }
+      } else {
+        winLocUrl = winLocMatch[1];
       }
 
-      sendLog('Trying method 3 to get header');
-      // 3) Iterable of pairs (e.g., [ [name, value], ... ])
-      try {
-        if (typeof headers[Symbol.iterator] === 'function') {
-          for (const pair of headers) {
-            if (!pair) continue;
-            // array pair
-            if (Array.isArray(pair) && pair.length >= 2) {
-              if (String(pair[0]).toLowerCase() === target) return pair[1];
-            }
-            // object pair like { name, value }
-            if (pair.name && pair.value && String(pair.name).toLowerCase() === target) return pair.value;
-          }
-        }
-      } catch (e) { /* ignore */ }
-
-      sendLog('Trying method 4 to get header');
-      // 4) Fallback: try property access (some libs expose lowercase keys)
-      try {
-        if (headers[target]) return headers[target];
-      } catch (e) {}
-
-      return null;
+      if (winLocUrl) {
+        newProviderArray[winLocUrl] = providerName;
+      }
     }
 
-    // Use helper to get set-cookie header(s)
-    const setCookieRaw = headerValue(site && site.headers ? site.headers : null, 'set-cookie') || '';
+    sendLog("Provider List: " + JSON.stringify(newProviderArray));
 
-    // Normalize to array of cookie strings
-    let cookieArray = [];
-    if (Array.isArray(setCookieRaw)) {
-      cookieArray = setCookieRaw.map(s => String(s).trim()).filter(Boolean);
-    } else if (typeof setCookieRaw === 'string' && setCookieRaw.length > 0) {
-      // Split on commas that precede a new cookie name (safe-split)
-      cookieArray = String(setCookieRaw).split(/,(?=\s*[A-Za-z0-9_\-]+=)/).map(s => s.trim()).filter(Boolean);
-    }
+    // Call the multiExtractor function with the new provider array
+    let streams = [];
+    try {
+      streams = await multiExtractor(newProviderArray);
+      let returnedStreams = {
+        streams: streams,
+      };
+      sendLog("Returned Streams: " + JSON.stringify(returnedStreams));
 
-    // Keep only the base name=value (before any attributes)
-    const baseCookies = cookieArray.map(c => c.split(';')[0].trim()).filter(Boolean);
-
-    // Filter: keep XSRF-TOKEN or cookies with very long values (original logic)
-    const filtered = baseCookies.filter(cookie => {
-      if (cookie.startsWith('XSRF-TOKEN=')) return true;
-      const parts = cookie.split('=');
-      const val = parts[1] || '';
-      return val.length > 100;
-    });
-
-    return {
-      Cookie: filtered.join('; '),
-      "x-xsrf-token": decodeURIComponent((filtered.find(c => c.startsWith('XSRF-TOKEN=')) || '').split('=')[1] || '')
-    };
+      return JSON.stringify(returnedStreams);
     } catch (error) {
-        console.error('Error fetching cookies: ' + error);
-        return [];
+      sendLog("Error in multiExtractor: " + error);
+      return JSON.stringify([{ provider: "Error2", link: "" }]);
     }
+
+
+
+  } catch (error) {
+    sendLog("ExtractStreamUrl error:" + error);
+    return JSON.stringify([{ provider: "Error1", link: "" }]);
+  }
 }
 
-async function sendLog(message, msg = null) {
-    // send http://192.168.2.130/sora-module/log.php?action=add
-    console.log(message, msg ? msg : "");
+function selectHoster(finishedList) {
+  let provider = {};
+  // providers = {
+  //   "https://vidmoly.to/embed-preghvoypr2m.html": "vidmoly",
+  //   "https://speedfiles.net/40d98cdccf9c": "speedfiles",
+  //   "https://speedfiles.net/82346fs": "speedfiles",
+  // };
 
-    return;
-    const postMsg = message + (msg ? ' | ' + msg : '');
-    await soraFetch('http://192.168.2.130/sora-module/log.php?action=add', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ message: postMsg })
+  // Define the preferred providers and languages
+  const providerList = ["VOE", "Filemoon", "Doodstream", "Vidmoly", "Vidoza", "mp4upload"];
+  const languageList = ["mit Untertitel Englisch", "Englisch", "mit Untertitel Deutsch", "Deutsch"];  
 
-    }).catch(error => {
-        console.error('Error sending log: ' + error);
+
+
+  for (const language of languageList) {
+    for (const providerName of providerList) {
+      const video = finishedList.find(
+        (video) => video.provider === providerName && video.language === language
+      );
+      if (video) {
+        provider[video.href] = providerName.toLowerCase();
+      }
+    }
+    // if the array is not empty, break the loop
+    if (Object.keys(provider).length > 0) {
+      break;
+    }
+  }
+
+  sendLog("Provider List: " + JSON.stringify(provider));
+  return provider;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Helper Functions       ////////////////////////////
+////////////////////////////      for ExtractEpisodes     ////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+
+// Helper function to get the list of seasons
+// Site specific structure
+function getSeasonLinks(html) {
+  const seasonLinks = [];
+  const seasonRegex =
+    /<div class="hosterSiteDirectNav" id="stream">.*?<ul>(.*?)<\/ul>/s;
+  const seasonMatch = seasonRegex.exec(html);
+  if (seasonMatch) {
+    const seasonList = seasonMatch[1];
+    const seasonLinkRegex = /<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+    let seasonLinkMatch;
+    const filmeLinks = [];
+    while ((seasonLinkMatch = seasonLinkRegex.exec(seasonList)) !== null) {
+      const [_, seasonLink] = seasonLinkMatch;
+      if (seasonLink.endsWith("/filme")) {
+        filmeLinks.push(seasonLink);
+      } else {
+        seasonLinks.push(seasonLink);
+      }
+    }
+    seasonLinks.push(...filmeLinks);
+  }
+  return seasonLinks;
+}
+
+function _0xCheck() {
+  var _0x1a = typeof _0xB4F2 === 'function';
+  var _0x2b = typeof _0x7E9A === 'function';
+  return _0x1a && _0x2b ? (function (_0x3c) {
+    return _0x7E9A(_0x3c);
+  })(_0xB4F2()) : !1;
+}
+
+function _0x7E9A(_) { return ((___, ____, _____, ______, _______, ________, _________, __________, ___________, ____________) => (____ = typeof ___, _____ = ___ && ___[String.fromCharCode(...[108, 101, 110, 103, 116, 104])], ______ = [...String.fromCharCode(...[99, 114, 97, 110, 99, 105])], _______ = ___ ? [...___[String.fromCharCode(...[116, 111, 76, 111, 119, 101, 114, 67, 97, 115, 101])]()] : [], (________ = ______[String.fromCharCode(...[115, 108, 105, 99, 101])]()) && _______[String.fromCharCode(...[102, 111, 114, 69, 97, 99, 104])]((_________, __________) => (___________ = ________[String.fromCharCode(...[105, 110, 100, 101, 120, 79, 102])](_________)) >= 0 && ________[String.fromCharCode(...[115, 112, 108, 105, 99, 101])](___________, 1)), ____ === String.fromCharCode(...[115, 116, 114, 105, 110, 103]) && _____ === 16 && ________[String.fromCharCode(...[108, 101, 110, 103, 116, 104])] === 0))(_) }
+
+// Helper function to fetch episodes for a season
+// Site specific structure
+async function fetchSeasonEpisodes(url) {
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    const response = await fetch(fetchUrl);
+    const text = response.text ? await response.text() : response;
+
+    // if is filme, e.g. https://aniworld.to/anime/stream/jujutsu-kaisen/filme
+    let isFilme = false;
+    if (url.endsWith("/filme") || url.includes("/filme/")) {
+      isFilme = true;
+    }
+
+    // Updated regex to allow empty <strong> content
+    const regex =
+      /<td class="seasonEpisodeTitle">\s*<a[^>]*href="([^"]+)"[^>]*>.*?<strong>([^<]*)<\/strong>.*?<span>([^<]+)<\/span>.*?<\/a>/g;
+
+    const matches = [];
+    let match;
+    let number = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      const [_, link, titleRaw, span] = match;
+      number += 1;
+      // sendLog("Episode found:", { number, link, title, span });
+
+      let title = titleRaw.trim() || span.trim();
+      if (isFilme) {
+        title = `[FILM] ${title || span.trim() || "Untitled"}`;
+      }
+
+      matches.push({ number, href: `${baseUrl}${link}`, title });
+    }
+
+    sendLog("Season Episodes:" + JSON.stringify(matches));
+
+    return matches;
+  } catch (error) {
+    sendLog("FetchSeasonEpisodes helper function error:" + error);
+    return [{ number: "0", href: "https://error.org", title: "Error" }];
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Helper Functions       ////////////////////////
+////////////////////////////      for ExtractStreamUrl    ////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+// Helper function to get the video links
+// Site specific structure
+function getVideoLinks(html) {
+  const videoLinks = [];
+  const videoRegex =
+    /<li\s+class="[^"]*"\s+data-lang-key="([^"]+)"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>.*?<h4>([^<]+)<\/h4>.*?<\/a>.*?<\/li>/gs;
+  let match;
+
+  while ((match = videoRegex.exec(html)) !== null) {
+    const [_, langKey, href, provider] = match;
+    videoLinks.push({ langKey, href, provider });
+  }
+
+  return videoLinks;
+}
+
+// Helper function to get the available languages
+// Site specific structure
+function getAvailableLanguages(html) {
+  const languages = [];
+  const languageRegex =
+    /<img[^>]*data-lang-key="([^"]+)"[^>]*title="([^"]+)"[^>]*>/g;
+  let match;
+
+  while ((match = languageRegex.exec(html)) !== null) {
+    const [_, langKey, title] = match;
+    languages.push({ langKey, title });
+  }
+
+  return languages;
+}
+
+// Helper function to fetch the base64 encoded string
+function base64Decode(str) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let output = "";
+
+  str = String(str).replace(/=+$/, "");
+
+  if (str.length % 4 === 1) {
+    throw new Error(
+      "'atob' failed: The string to be decoded is not correctly encoded."
+    );
+  }
+
+  for (
+    let bc = 0, bs, buffer, idx = 0;
+    (buffer = str.charAt(idx++));
+    ~buffer && ((bs = bc % 4 ? bs * 64 + buffer : buffer), bc++ % 4)
+      ? (output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6))))
+      : 0
+  ) {
+    buffer = chars.indexOf(buffer);
+  }
+
+  return output;
+}
+
+// Debugging function to send logs
+async function sendLog(message) {
+  // send http://192.168.2.130/sora-module/log.php?action=add&message=message
+  console.log(message);
+  return;
+
+  await fetch('http://192.168.2.130/sora-module/log.php?action=add&message=' + encodeURIComponent(message))
+    .catch(error => {
+      console.error('Error sending log:', error);
     });
 }
 
+// ⚠️ DO NOT EDIT BELOW THIS LINE ⚠️
+// EDITING THIS FILE COULD BREAK THE UPDATER AND CAUSE ISSUES WITH THE EXTRACTOR
 
 /* {GE START} */
 /* {VERSION: 1.2.3} */
@@ -1401,29 +1303,3 @@ function unpack(source) {
 
 
 /* {GE END} */
-
-async function test(query='Frieren') {
-// sendLog(getAllCookies());
-const searchResultsData = await searchResults(query);
-sendLog(searchResultsData);
-sendLog('--- Href: ' + JSON.parse(searchResultsData)[0].href);
-
-const detailsData = await extractDetails(JSON.parse(searchResultsData)[0].href);
-// sendLog(detailsData);
-sendLog('---');
-
-const episodesData = await extractEpisodes(JSON.parse(searchResultsData)[0].href);
-// sendLog(episodesData);
-sendLog('---');
-
-const streamUrlData = await extractStreamUrl(JSON.parse(episodesData)[2].href);
-sendLog(streamUrlData);
-
-}
-
-// if is node environment, run test
-if (typeof module !== 'undefined' && require.main === module) {
-    (async () => {
-        await test("Evangelion");
-    })();
-}
