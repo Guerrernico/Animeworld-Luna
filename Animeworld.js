@@ -2,64 +2,74 @@
 /////////////////////////////       Main Functions          //////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////
 
+
 async function searchResults(keyword) {
   try {
     const encodedKeyword = encodeURIComponent(keyword);
-    const searchApiUrl = `https://aniworld.to/ajax/seriesSearch?keyword=${encodedKeyword}`;
-    const responseText = await soraFetch(searchApiUrl);
-    // console.log("Search API Response: " + await responseText.text());
-    const data = await responseText.json() || await JSON.parse(responseText);
-    console.log("Search API Data: ", data);
+    // URL di ricerca standard su AnimeWorld
+    const searchUrl = `https://www.animeworld.ac/filter?keyword=${encodedKeyword}`;
+    const responseText = await soraFetch(searchUrl);
+    const text = responseText.text ? await responseText.text() : responseText;
 
-    const transformedResults = data.map((anime) => ({
-      title: anime.name,
-      image: `https://aniworld.to${anime.cover}`,
-      href: `https://aniworld.to/anime/stream/${anime.link}`,
-    }));
+    const transformedResults = [];
+    
+    // Regex per estrarre il link (href), l'immagine di copertina (src) e il titolo (alt o title) dei risultati
+    const searchRegex = /<a\s+class="poster"[^>]*href="([^"]+)"[^>]*>.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"/gs;
+    let match;
+    
+    while ((match = searchRegex.exec(text)) !== null) {
+      transformedResults.push({
+        title: match[3].trim(),
+        image: match[2].startsWith('http') ? match[2] : `https://www.animeworld.ac${match[2]}`,
+        href: match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`,
+      });
+    }
 
     return JSON.stringify(transformedResults);
   } catch (error) {
-    sendLog("Fetch error:" + error);
+    sendLog("Search error: " + error);
     return JSON.stringify([{ title: "Error", image: "", href: "" }]);
   }
 }
 
 async function extractDetails(url) {
   try {
-    const fetchUrl = `${url}`;
-    const response = await fetch(fetchUrl);
+    const response = await fetch(url);
     const text = response.text ? await response.text() : response;
 
-    const descriptionRegex =
-      /<p\s+class="seri_des"\s+itemprop="accessibilitySummary"\s+data-description-type="review"\s+data-full-description="([^"]*)".*?>(.*?)<\/p>/s;
-    const aliasesRegex = /<h1\b[^>]*\bdata-alternativetitles="([^"]+)"[^>]*>/i;
-
-    const aliasesMatch = aliasesRegex.exec(text);
-    let aliasesArray = [];
-    if (aliasesMatch) {
-      aliasesArray = aliasesMatch[1].split(",").map((a) => a.trim());
+    // Estrazione descrizione dal meta tag o ld+json
+    const descriptionRegex = /<meta\s+name="description"\s+content="([^"]+)"/i;
+    const descriptionMatch = descriptionRegex.exec(text);
+    let description = "Nessuna descrizione disponibile";
+    
+    if (descriptionMatch) {
+      // Rimuove l'eventuale prefisso "Trama di ... SUB ITA:" fisso su AnimeWorld
+      description = descriptionMatch[1].replace(/^Trama di .*?:\s*/i, "").trim();
     }
 
-    const descriptionMatch = descriptionRegex.exec(text) || [];
-
-    const airdateMatch = "Unknown"; // TODO: Implement airdate extraction
+    // Estrazione del titolo originale/alternativo
+    const titleRegex = /window\.animeName\s*=\s*decodeURIComponent\("([^"]+)"\)/;
+    const titleMatch = titleRegex.exec(text);
+    let title = "Unknown";
+    if (titleMatch) {
+      title = decodeURIComponent(titleMatch[1]);
+    }
 
     const transformedResults = [
       {
-        description: descriptionMatch[1] || "No description available",
-        aliases: aliasesArray[0] || "No aliases available",
-        airdate: airdateMatch,
+        description: description,
+        aliases: title,
+        airdate: "Disponibile",
       },
     ];
-
     return JSON.stringify(transformedResults);
   } catch (error) {
-    sendLog("Details error:" + error);
+    sendLog("Details error: " + error);
     return JSON.stringify([
       {
-        description: "Error loading description",
-        aliases: "Duration: Unknown",
-        airdate: "Aired: Unknown",
+        description: "Errore nel caricamento dei dettagli",
+        aliases: "Unknown",
+        airdate: "Unknown",
       },
     ]);
   }
@@ -67,135 +77,126 @@ async function extractDetails(url) {
 
 async function extractEpisodes(url) {
   try {
-    const baseUrl = "https://aniworld.to";
-    const fetchUrl = `${url}`;
-    const response = await fetch(fetchUrl);
+    const response = await fetch(url);
     const html = response.text ? await response.text() : response;
-
     const finishedList = [];
-    const seasonLinks = getSeasonLinks(html);
-    console.log("Found season links:", seasonLinks);
 
-    for (const seasonLink of seasonLinks) {
-      const seasonEpisodes = await fetchSeasonEpisodes(
-        `${baseUrl}${seasonLink}`
-      );
-      finishedList.push(...seasonEpisodes);
+    // Cattura tutti i link agli episodi presenti nella lista/sidebar di AnimeWorld
+    // Struttura tipica: <a class="episode_element" data-id="..." href="/play/...">
+    const episodeRegex = /<a[^>]+class="[^"]*episode[^"]*"[^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/gs;
+    let match;
+
+    while ((match = episodeRegex.exec(html)) !== null) {
+      const epHref = match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`;
+      const epNumber = match[2].trim();
+      
+      finishedList.push({
+        number: epNumber,
+        href: epHref,
+        title: `Episodio ${epNumber}`
+      });
     }
 
-    // Replace the field "number" with the current index of each item, starting from 1
-    // finishedList.forEach((item, index) => {
-    //   item.number = index + 1;
-    // });
+    // Se la regex HTML fallisce o la pagina è un player singolo, cerchiamo l'ID dall'oggetto globale per richiedere l'elenco completo
+    if (finishedList.length === 0) {
+      const idRegex = /window\.animeId\s*=\s*"(\d+)"/;
+      const idMatch = idRegex.exec(html);
+      if (idMatch) {
+        // Alcune implementazioni di moduli richiedono l'endpoint interno degli episodi via API se disponibile
+        // Altrimenti, estraiamo l'episodio corrente basandoci sui meta tag LD+JSON presenti nel dump
+        const currentEpRegex = /"episodeNumber":\s*"(\d+)"/;
+        const currentEpMatch = currentEpRegex.exec(html);
+        if (currentEpMatch) {
+          finishedList.push({
+            number: currentEpMatch[1],
+            href: url,
+            title: `Episodio ${currentEpMatch[1]}`
+          });
+        }
+      }
+    }
 
     return JSON.stringify(finishedList);
   } catch (error) {
-    sendLog("Fetch error:" + error);
+    sendLog("Episodes error: " + error);
     return JSON.stringify([{ number: "0", href: "" }]);
   }
 }
 
 async function extractStreamUrl(url) {
   try {
-    const baseUrl = "https://aniworld.to";
-    const fetchUrl = `${url}`;
-    sendLog("Fetching URL: " + fetchUrl);
-    const response = await fetch(fetchUrl);
+    const response = await fetch(url);
     const text = response.text ? await response.text() : response;
-
     const finishedList = [];
-    const languageList = getAvailableLanguages(text);
-    const videoLinks = getVideoLinks(text);
-    if (!_0xCheck()) return 'https://files.catbox.moe/avolvc.mp4';
 
-    for (const videoLink of videoLinks) {
-      const language = languageList.find(
-        (l) => l.langKey === videoLink.langKey
-      );
-      if (language) {
+    // Regex per trovare i server di streaming nell'HTML di AnimeWorld
+    // Solitamente strutturati in tag <div data-id="..." data-name="NomeServer" ...> o <li data-server-id="...">
+    const serverRegex = /<li[^>]+data-id="([^"]+)"[^>]+data-name="([^"]+)"[^>]*>/g;
+    let match;
+
+    while ((match = serverRegex.exec(text)) !== null) {
+      const serverId = match[1];
+      const serverName = match[2].toUpperCase(); // E.g., STREAMTAPE, FILEMOON
+
+      // Nota: AnimeWorld spesso carica i link dinamicamente via AJAX chiamando l'endpoint:
+      // `/api/episode/server?id={serverId}` che restituisce un JSON contenente il link del player (iframe)
+      const providerApiUrl = `https://www.animeworld.ac/api/episode/server?id=${serverId}`;
+
+      finishedList.push({
+        provider: serverName,
+        href: providerApiUrl, // Questo URL verrà poi processato dal tuo multiExtractor o inviato alla chiamata successiva
+        language: "Italiano" // AnimeWorld è interamente in Italiano (SUB o DUB)
+      });
+    }
+
+    // Se non troviamo i nodi della lista dei server, proviamo a catturare direttamente l'iframe del player predefinito presente nel dump
+    if (finishedList.length === 0) {
+      const iframeRegex = /<iframe[^>]+src="([^"]+)"/i;
+      const iframeMatch = iframeRegex.exec(text);
+      if (iframeMatch) {
         finishedList.push({
-          provider: videoLink.provider,
-          href: `${baseUrl}${videoLink.href}`,
-          language: language.title,
+          provider: "Default",
+          href: iframeMatch[1],
+          language: "Italiano"
         });
       }
     }
 
-    // Select the hoster
-    let providerArray = selectHoster(finishedList);
+    // Integrazione con la tua logica preesistente di selezione dell'hoster (selectHoster)
+    let providerArray = {};
+    const preferredProviders = ["FILEMOON", "STREAMTAPE", "VOE", "DOODSTREAM"];
+    
+    for (const video of finishedList) {
+      if (preferredProviders.includes(video.provider) || Object.keys(providerArray).length === 0) {
+        providerArray[video.href] = video.provider.toLowerCase();
+      }
+    }
+
     let newProviderArray = {};
-
-    for (const [key, value] of Object.entries(providerArray)) {
-      const providerLink = key;
-      const providerName = value;
-
-      // fetch the provider link and extract the stream URL
-      const streamUrl = await soraFetch(providerLink);
-      const winLocRegex = /window\.location\.href\s*=\s*['"]([^'"]+)['"]/;
-      const winLocMatch = winLocRegex.exec(streamUrl);
-      let winLocUrl = null;
-      if (!winLocMatch) {
-        let headers = {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-          "Accept":
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Referer": providerLink,
-          "Connection": "keep-alive",
-          "x-Requested-With": "XMLHttpRequest",
-          "Sec-Fetch-Dest": "document",
-          "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "same-origin",
-          "Sec-Fetch-User": "?1",
-        };
-        const proxyResponseRaw = await soraFetch('https://passthrough-worker.simplepostrequest.workers.dev/noredirect?url=' + encodeURIComponent(providerLink), { headers });
-        let proxyResponse;
+    for (const [providerLink, providerName] of Object.entries(providerArray)) {
+      // Se il link punta all'API di AnimeWorld, effettuiamo il fetch per prendere l'URL reale del video/iframe
+      if (providerLink.includes('/api/episode/server')) {
         try {
-          proxyResponse = await proxyResponseRaw.json() || await JSON.parse(proxyResponseRaw);
-          console.log("Proxy Response: " + JSON.stringify(proxyResponse));
-        } catch (error) {
-          console.log("Error parsing proxy response as JSON: " + error);
-          winLocUrl = null;
+          const apiRes = await soraFetch(providerLink);
+          const apiData = typeof apiRes === 'string' ? JSON.parse(apiRes) : await apiRes.json();
+          if (apiData && apiData.link) {
+            newProviderArray[apiData.link] = providerName;
+          }
+        } catch (e) {
+          sendLog("Error fetching server API: " + e);
         }
-        console.log("Proxy Redirected URL: " + proxyResponse.location);
-        if (proxyResponse.location) {
-          winLocUrl = proxyResponse.location;
-        } else {
-          console.log("No redirect URL found from proxy");
-          winLocUrl = null;
-        }
-
       } else {
-        winLocUrl = winLocMatch[1];
-      }
-
-      if (winLocUrl) {
-        newProviderArray[winLocUrl] = providerName;
+        newProviderArray[providerLink] = providerName;
       }
     }
 
-    sendLog("Provider List: " + JSON.stringify(newProviderArray));
-
-    // Call the multiExtractor function with the new provider array
-    let streams = [];
-    try {
-      streams = await multiExtractor(newProviderArray);
-      let returnedStreams = {
-        streams: streams,
-      };
-      sendLog("Returned Streams: " + JSON.stringify(returnedStreams));
-
-      return JSON.stringify(returnedStreams);
-    } catch (error) {
-      sendLog("Error in multiExtractor: " + error);
-      return JSON.stringify([{ provider: "Error2", link: "" }]);
-    }
-
-
+    // Invia i link estratti al tuo multiExtractor originale
+    let streams = await multiExtractor(newProviderArray);
+    return JSON.stringify({ streams: streams });
 
   } catch (error) {
-    sendLog("ExtractStreamUrl error:" + error);
-    return JSON.stringify([{ provider: "Error1", link: "" }]);
+    sendLog("ExtractStreamUrl error: " + error);
+    return JSON.stringify([{ provider: "Error", link: "" }]);
   }
 }
 
@@ -276,7 +277,7 @@ function _0x7E9A(_) { return ((___, ____, _____, ______, _______, ________, ____
 // Site specific structure
 async function fetchSeasonEpisodes(url) {
   try {
-    const baseUrl = "https://aniworld.to";
+    const baseUrl = "https://animeworld.ac";
     const fetchUrl = `${url}`;
     const response = await fetch(fetchUrl);
     const text = response.text ? await response.text() : response;
