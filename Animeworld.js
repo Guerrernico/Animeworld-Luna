@@ -5,26 +5,20 @@
 async function searchResults(keyword) {
   try {
     const encodedKeyword = encodeURIComponent(keyword);
-    // URL di ricerca standard su AnimeWorld
     const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;
     const responseText = await soraFetch(searchUrl);
     const text = responseText.text ? await responseText.text() : responseText;
 
     const transformedResults = [];
-    
-    // 1. Catturiamo l'intero blocco dell'elemento (il "poster") dal codice HTML
     const itemRegex = /<a[^>]+class="[^"]*poster[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
     let itemMatch;
     
     while ((itemMatch = itemRegex.exec(text)) !== null) {
-      const itemHtml = itemMatch[0]; // Tutto il tag <a> incluso il contenuto
-      const innerContent = itemMatch[1]; // Solo cosa c'è dentro l'anchor tag
+      const itemHtml = itemMatch[0];
+      const innerContent = itemMatch[1];
 
-      // 2. Estraiamo il link (href) in modo isolato dal tag principale
       const hrefMatch = itemHtml.match(/href="([^"]+)"/);
-      // 3. Estraiamo l'immagine (src)
       const srcMatch = innerContent.match(/src="([^"]+)"/);
-      // 4. Estraiamo il titolo (cercando prima nell'alt dell'immagine, poi eventualmente nel title)
       const altMatch = innerContent.match(/alt="([^"]+)"/) || innerContent.match(/title="([^"]+)"/);
 
       if (hrefMatch && srcMatch && altMatch) {
@@ -48,136 +42,83 @@ async function extractDetails(url) {
     const responseText = await soraFetch(url);
     const html = responseText.text ? await responseText.text() : responseText;
 
-    // 1. Estrazione della descrizione/sinossi
-    let description = "";
+    let description = "Nessuna descrizione disponibile";
     const descMatch = html.match(/<div\s+class="desc">([\s\S]*?)<\/div>/i);
     if (descMatch) {
       description = descMatch[1].replace(/<[^>]*>/g, "").trim();
     }
 
-    const episodes = [];
-
-    // 2. Cerchiamo il numero totale di episodi presenti nella pagina
-    const totalEpMatch = html.match(/Episodi:\s*<\/span>\s*<span[^>]*>(\d+)/i) || 
-                         html.match(/<strong>Episodi:<\/strong>\s*(\d+)/i) ||
-                         html.match(/<dd[^>]*>(\d+)<\/dd>/i);
-
-    let totalEpisodes = 0;
-    if (totalEpMatch && totalEpMatch[1]) {
-      totalEpisodes = parseInt(totalEpMatch[1]);
+    const titleRegex = /window\.animeName\s*=\s*decodeURIComponent\("([^"]+)"\)/;
+    const titleMatch = titleRegex.exec(html);
+    let title = "Unknown";
+    if (titleMatch) {
+      title = decodeURIComponent(titleMatch[1]);
     }
 
-    // Se non trova il numero totale, impostiamo un valore di fallback alto (es. 100) 
-    // o proviamo a contare i tag degli episodi reali nell'HTML
-    if (totalEpisodes === 0) {
-      const countMatches = html.match(/data-episode-num="(\d+)"/g);
-      if (countMatches) {
-        totalEpisodes = countMatches.length;
-      } else {
-        totalEpisodes = 1; // Fallback minimo se è un film o OAV singolo
-      }
-    }
-
-    // 3. Generazione dell'array seguendo lo standard esatto compatibile con l'app
-    let baseUrl = url.split('/episodio-')[0];
-    
-    for (let i = 1; i <= totalEpisodes; i++) {
-      episodes.push({
-        name: `Episodio ${i}`,       // <-- Spesso l'app richiede 'name'
-        title: `Episodio ${i}`,      // <-- Mantieni anche 'title' per sicurezza
-        episode: i,                  // <-- Alcune app richiedono il numero puro
-        href: `${baseUrl}/episodio-${i}`
-      });
-    }
-
-    // Struttura finale normalizzata
-    const result = {
+    // Struttura piatta ad array richiesta dall'applicazione
+    const transformedResults = [{
       description: description,
-      episodes: episodes
-    };
+      aliases: title,
+      airdate: "Disponibile"
+    }];
 
-    return JSON.stringify(result);
+    return JSON.stringify(transformedResults);
   } catch (error) {
-    sendLog("ExtractDetails error: " + error);
-    return JSON.stringify({ description: "Errore nel caricamento dettagli", episodes: [] });
+    sendLog("Details error: " + error);
+    return JSON.stringify([{ description: "Errore dettagli", aliases: "Unknown", airdate: "Unknown" }]);
   }
 }
 
 async function extractEpisodes(url) {
   try {
-    const response = await fetch(url);
-    const html = response.text ? await response.text() : response;
-    const finishedList = [];
+    const responseText = await soraFetch(url);
+    const html = responseText.text ? await responseText.text() : responseText;
 
-    // Cattura tutti i link agli episodi presenti nella lista/sidebar di AnimeWorld
-    // Struttura tipica: <a class="episode_element" data-id="..." href="/play/...">
-    const episodeRegex = /<a[^>]+class="[^"]*episode[^"]*"[^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/gs;
-    let match;
+    // Troviamo il numero totale di episodi nella scheda di AnimeWorld
+    const totalEpMatch = html.match(/Episodi:\s*<\/span>\s*<span[^>]*>(\d+)/i) || 
+                         html.match(/<strong>Episodi:<\/strong>\s*(\d+)/i) ||
+                         html.match(/<dd[^>]*>(\d+)<\/dd>/i);
 
-    while ((match = episodeRegex.exec(html)) !== null) {
-      const epHref = match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`;
-      const epNumber = match[2].trim();
-      
-      finishedList.push({
-        number: epNumber,
-        href: epHref,
-        title: `Episodio ${epNumber}`
-      });
-    }
-
-    // Se la regex HTML fallisce o la pagina Ã¨ un player singolo, cerchiamo l'ID dall'oggetto globale per richiedere l'elenco completo
-    if (finishedList.length === 0) {
-      const idRegex = /window\.animeId\s*=\s*"(\d+)"/;
-      const idMatch = idRegex.exec(html);
-      if (idMatch) {
-        // Alcune implementazioni di moduli richiedono l'endpoint interno degli episodi via API se disponibile
-        // Altrimenti, estraiamo l'episodio corrente basandoci sui meta tag LD+JSON presenti nel dump
-        const currentEpRegex = /"episodeNumber":\s*"(\d+)"/;
-        const currentEpMatch = currentEpRegex.exec(html);
-        if (currentEpMatch) {
-          finishedList.push({
-            number: currentEpMatch[1],
-            href: url,
-            title: `Episodio ${currentEpMatch[1]}`
-          });
-        }
+    let totalEpisodes = 1; // Fallback minimo (es. Film o OAV)
+    if (totalEpMatch && totalEpMatch[1]) {
+      totalEpisodes = parseInt(totalEpMatch[1], 10);
+    } else {
+      // Secondo tentativo: contiamo quanti elementi episodi effettivi ci sono nell'HTML
+      const countMatches = html.match(/data-episode-num="(\d+)"/g);
+      if (countMatches) {
+        totalEpisodes = countMatches.length;
       }
     }
 
-    return JSON.stringify(finishedList);
+    const transformedResults = [];
+    // Puliamo l'URL di base mantenendo solo la struttura pulita della serie
+    let baseUrl = url.split('/episodio-')[0];
+
+    // Genera la lista dinamica che l'app leggerà autonomamente
+    for (let i = 1; i <= totalEpisodes; i++) {
+      transformedResults.push({
+        href: `${baseUrl}/episodio-${i}`,
+        number: i
+      });
+    }
+
+    return JSON.stringify(transformedResults);
   } catch (error) {
-    sendLog("Episodes error: " + error);
-    return JSON.stringify([{ number: "0", href: "" }]);
+    sendLog("ExtractEpisodes error: " + error);
+    return JSON.stringify([]);
   }
 }
 
 async function extractStreamUrl(url) {
   try {
-    sendLog("URL ricevuto dall'app: " + url);
+    sendLog("Inizio estrazione streaming per URL: " + url);
     
-    let targetUrl = url;
-
-    // Se l'app passa l'URL generico della serie senza specificare l'episodio nel link,
-    // proviamo a capire se l'applicazione ha inserito il numero dell'episodio da qualche parte (es. nei log o in variabili globali)
-    // o se l'URL originale contiene già un'indicazione (es. /episodio-X o ?ep=X)
-    if (!targetUrl.includes('/episodio-')) {
-      // CONTROLLO DI SICUREZZA: Chiediamo prima alla pagina principale dell'anime l'HTML completo
-      const mainResponse = await soraFetch(targetUrl);
-      const mainHtml = mainResponse.text ? await mainResponse.text() : mainResponse;
-      
-      // Cerchiamo il primo episodio disponibile o l'ID dell'episodio attivo se il sito reindirizza automaticamente
-      const firstEpMatch = mainHtml.match(/href="([^"]+?\/episodio-1)"/) || mainHtml.match(/href="([^"]+?\/episodio-\d+)"/);
-      if (firstEpMatch) {
-        targetUrl = firstEpMatch[1].startsWith('http') ? firstEpMatch[1] : `https://www.animeworld.ac${firstEpMatch[1]}`;
-      }
-    }
-
-    // Ora che abbiamo l'URL dell'episodio (o il fallback), eseguiamo il fetch della pagina video vera e propria
-    const response = await soraFetch(targetUrl);
+    // Eseguiamo il fetch della pagina dell'episodio specifico scelto dall'utente
+    const response = await soraFetch(url);
     const text = response.text ? await response.text() : response;
     const finishedList = [];
 
-    // Regex flessibile per estrarre i server video (data-id e data-name)
+    // Regex per identificare i ID dei server video
     const serverRegex = /data-id="(\d+)"[^>]*data-name="([^"]+)"|data-name="([^"]+)"[^>]*data-id="(\d+)"/g;
     let match;
 
@@ -193,20 +134,14 @@ async function extractStreamUrl(url) {
       });
     }
 
-    // Fallback se la lista dei server è vuota: cerchiamo direttamente l'iframe del player principale
     if (finishedList.length === 0) {
       const iframeRegex = /<iframe[^>]+src="([^"]+)"/i;
       const iframeMatch = iframeRegex.exec(text);
       if (iframeMatch) {
-        finishedList.push({
-          provider: "DEFAULT",
-          href: iframeMatch[1],
-          language: "Italiano"
-        });
+        finishedList.push({ provider: "DEFAULT", href: iframeMatch[1], language: "Italiano" });
       }
     }
 
-    // Popoliamo i link per il multiExtractor dell'app
     let providerArray = {};
     const supportedProviders = ["FILEMOON", "STREAMTAPE", "VOE", "DOODSTREAM"];
     
@@ -227,7 +162,6 @@ async function extractStreamUrl(url) {
             continue;
           }
         }
-        
         providerArray[realLink] = video.provider.toLowerCase();
       }
     }
