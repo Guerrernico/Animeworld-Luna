@@ -140,74 +140,72 @@ async function extractStreamUrl(url) {
     const text = response.text ? await response.text() : response;
     const finishedList = [];
 
-    // Regex per trovare i server di streaming nell'HTML di AnimeWorld
-    // Solitamente strutturati in tag <div data-id="..." data-name="NomeServer" ...> o <li data-server-id="...">
-    const serverRegex = /<li[^>]+data-id="([^"]+)"[^>]+data-name="([^"]+)"[^>]*>/g;
+    // Nuova Regex ultra-flessibile: intercetta l'id e il nome del server ovunque siano posizionati nel tag
+    const serverRegex = /data-id="(\d+)"[^>]*data-name="([^"]+)"|data-name="([^"]+)"[^>]*data-id="(\d+)"/g;
     let match;
 
     while ((match = serverRegex.exec(text)) !== null) {
-      const serverId = match[1];
-      const serverName = match[2].toUpperCase(); // E.g., STREAMTAPE, FILEMOON
+      // Gestiamo il fatto che l'id o il nome possano essere arrivati invertiti nella regex
+      const serverId = match[1] || match[4];
+      const serverName = (match[2] || match[3]).toUpperCase().trim();
 
-      // Nota: AnimeWorld spesso carica i link dinamicamente via AJAX chiamando l'endpoint:
-      // `/api/episode/server?id={serverId}` che restituisce un JSON contenente il link del player (iframe)
       const providerApiUrl = `https://www.animeworld.ac/api/episode/server?id=${serverId}`;
-
       finishedList.push({
         provider: serverName,
-        href: providerApiUrl, // Questo URL verrà poi processato dal tuo multiExtractor o inviato alla chiamata successiva
-        language: "Italiano" // AnimeWorld è interamente in Italiano (SUB o DUB)
+        href: providerApiUrl,
+        language: "Italiano"
       });
     }
 
-    // Se non troviamo i nodi della lista dei server, proviamo a catturare direttamente l'iframe del player predefinito presente nel dump
+    // Fallback: se la lista è vuota, cerca l'iframe del player principale
     if (finishedList.length === 0) {
       const iframeRegex = /<iframe[^>]+src="([^"]+)"/i;
       const iframeMatch = iframeRegex.exec(text);
       if (iframeMatch) {
         finishedList.push({
-          provider: "Default",
+          provider: "DEFAULT",
           href: iframeMatch[1],
           language: "Italiano"
         });
       }
     }
 
-    // Integrazione con la tua logica preesistente di selezione dell'hoster (selectHoster)
-    let providerArray = {};
-    const preferredProviders = ["FILEMOON", "STREAMTAPE", "VOE", "DOODSTREAM"];
+    // Filtriamo i provider trovati basandoci solo su quelli supportati dal tuo multiExtractor interno
+    let newProviderArray = {};
+    const supportedProviders = ["FILEMOON", "STREAMTAPE", "VOE", "DOODSTREAM"];
     
     for (const video of finishedList) {
-      if (preferredProviders.includes(video.provider) || Object.keys(providerArray).length === 0) {
-        providerArray[video.href] = video.provider.toLowerCase();
-      }
-    }
-
-    let newProviderArray = {};
-    for (const [providerLink, providerName] of Object.entries(providerArray)) {
-      // Se il link punta all'API di AnimeWorld, effettuiamo il fetch per prendere l'URL reale del video/iframe
-      if (providerLink.includes('/api/episode/server')) {
-        try {
-          const apiRes = await soraFetch(providerLink);
-          const apiData = typeof apiRes === 'string' ? JSON.parse(apiRes) : await apiRes.json();
-          if (apiData && apiData.link) {
-            newProviderArray[apiData.link] = providerName;
+      if (supportedProviders.includes(video.provider) || video.provider === "DEFAULT") {
+        let realLink = video.href;
+        
+        // Se il link è l'API interna di AnimeWorld, facciamo subito il fetch per ottenere l'URL reale (iframe)
+        if (realLink.includes('/api/episode/server')) {
+          try {
+            const apiRes = await soraFetch(realLink);
+            const apiData = typeof apiRes === 'string' ? JSON.parse(apiRes) : await apiRes.json();
+            if (apiData && apiData.link) {
+              realLink = apiData.link;
+            } else {
+              continue; // Salta se l'API non risponde correttamente
+            }
+          } catch (e) {
+            sendLog("Error fetching server API: " + e);
+            continue;
           }
-        } catch (e) {
-          sendLog("Error fetching server API: " + e);
         }
-      } else {
-        newProviderArray[providerLink] = providerName;
+        
+        // Popoliamo l'oggetto da passare al multiExtractor
+        newProviderArray[realLink] = video.provider.toLowerCase();
       }
     }
 
-    // Invia i link estratti al tuo multiExtractor originale
+    // Invia i link reali convertiti al multiExtractor globale dello script
     let streams = await multiExtractor(newProviderArray);
     return JSON.stringify({ streams: streams });
 
   } catch (error) {
     sendLog("ExtractStreamUrl error: " + error);
-    return JSON.stringify([{ provider: "Error", link: "" }]);
+    return JSON.stringify({ streams: [] });
   }
 }
 
