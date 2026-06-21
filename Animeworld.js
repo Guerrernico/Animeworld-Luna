@@ -45,44 +45,81 @@ async function searchResults(keyword) {
 
 async function extractDetails(url) {
   try {
-    const response = await fetch(url);
-    const text = response.text ? await response.text() : response;
+    const responseText = await soraFetch(url);
+    const html = responseText.text ? await responseText.text() : responseText;
 
-    // Estrazione descrizione dal meta tag o ld+json
-    const descriptionRegex = /<meta\s+name="description"\s+content="([^"]+)"/i;
-    const descriptionMatch = descriptionRegex.exec(text);
-    let description = "Nessuna descrizione disponibile";
+    // 1. Estrazione della descrizione/sinossi
+    let description = "";
+    const descMatch = html.match(/<div\s+class="desc">([\s\S]*?)<\/div>/i);
+    if (descMatch) {
+      description = descMatch[1].replace(/<[^>]*>/g, "").trim();
+    }
+
+    // 2. Estrazione degli episodi
+    const episodes = [];
     
-    if (descriptionMatch) {
-      // Rimuove l'eventuale prefisso "Trama di ... SUB ITA:" fisso su AnimeWorld
-      description = descriptionMatch[1].replace(/^Trama di .*?:\s*/i, "").trim();
+    // Su AnimeWorld gli episodi sono solitamente elencati dentro tag <a> o <li> con classe 'episode' o attributi data-id
+    // Questa regex cattura i link degli episodi e il loro numero visibile nel testo
+    const epRegex = /<a[^>]+class="[^"]*episode[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    let count = 1;
+
+    while ((match = epRegex.exec(html)) !== null) {
+      let epHref = match[1];
+      // Pulisce il testo per ottenere solo il numero dell'episodio
+      let epText = match[2].replace(/<[^>]*>/g, "").trim(); 
+      
+      // Se il testo estratto non è un numero valido, usa un contatore progressivo
+      let epNumber = parseInt(epText);
+      if (isNaN(epNumber)) {
+        epNumber = count;
+      }
+
+      // Assicurati che l'URL sia completo
+      if (!epHref.startsWith("http")) {
+        epHref = `https://www.animeworld.ac${epHref}`;
+      }
+
+      episodes.push({
+        title: `Episodio ${epNumber}`,
+        href: epHref
+      });
+      
+      count++;
     }
 
-    // Estrazione del titolo originale/alternativo
-    const titleRegex = /window\.animeName\s*=\s*decodeURIComponent\("([^"]+)"\)/;
-    const titleMatch = titleRegex.exec(text);
-    let title = "Unknown";
-    if (titleMatch) {
-      title = decodeURIComponent(titleMatch[1]);
+    // Fallback: Se la regex specifica fallisce, proviamo a cercare qualsiasi pulsante/link strutturato per gli episodi
+    if (episodes.length === 0) {
+      const fallbackRegex = /data-id="(\d+)"[^>]*data-episode-num="(\d+)"/g;
+      let fbMatch;
+      while ((fbMatch = fallbackRegex.exec(html)) !== null) {
+        episodes.push({
+          title: `Episodio ${fbMatch[2]}`,
+          href: `${url}?ep=${fbMatch[2]}` // Genera un query parameter di fallback o mantiene l'URL base
+        });
+      }
+    }
+    
+    // Rimuove eventuali duplicati se la regex ha fatto doppi controlli
+    const uniqueEpisodes = [];
+    const seen = new Set();
+    for (const ep of episodes) {
+      if (!seen.has(ep.href)) {
+        seen.add(ep.href);
+        uniqueEpisodes.push(ep);
+      }
     }
 
-    const transformedResults = [
-      {
-        description: description,
-        aliases: title,
-        airdate: "Disponibile",
-      },
-    ];
-    return JSON.stringify(transformedResults);
+    // Struttura finale richiesta dall'applicazione di streaming
+    const result = {
+      description: description,
+      episodes: uniqueEpisodes
+    };
+
+    return JSON.stringify(result);
   } catch (error) {
-    sendLog("Details error: " + error);
-    return JSON.stringify([
-      {
-        description: "Errore nel caricamento dei dettagli",
-        aliases: "Unknown",
-        airdate: "Unknown",
-      },
-    ]);
+    sendLog("ExtractDetails error: " + error);
+    return JSON.stringify({ description: "Errore nel caricamento", episodes: [] });
   }
 }
 
