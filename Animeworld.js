@@ -2,31 +2,36 @@
 /////////////////////////////       Main Functions          //////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////
 
-
 async function searchResults(keyword) {
   try {
-    const encodedKeyword = encodeURIComponent(keyword);
+    [span_1](start_span)const encodedKeyword = encodeURIComponent(keyword);[span_1](end_span)
     // URL di ricerca standard su AnimeWorld
-    const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;
-    const responseText = await soraFetch(searchUrl);
-    const text = responseText.text ? await responseText.text() : responseText;
+    [span_2](start_span)const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;[span_2](end_span)
+    [span_3](start_span)const responseText = await soraFetch(searchUrl);[span_3](end_span)
+    [span_4](start_span)const text = responseText.text ? await responseText.text() : responseText;[span_4](end_span)
 
-    const transformedResults = [];
-    
+    [span_5](start_span)const transformedResults = [];[span_5](end_span)
     // Regex per estrarre il link (href), l'immagine di copertina (src) e il titolo (alt o title) dei risultati
-    const searchRegex = /<a\s+class="poster"[^>]*href="([^"]+)"[^>]*>.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"/gs;
+    [span_6](start_span)const searchRegex = /<a\s+class="poster"[^>]*href="([^"]+)"[^>]*>.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"/gs;[span_6](end_span)
     let match;
     
-        while ((match = searchRegex.exec(text)) !== null) {
+    [span_7](start_span)while ((match = searchRegex.exec(text)) !== null) {[span_7](end_span)
       transformedResults.push({
-        title: match[3].trim(),
-        image: match[2].startsWith('http') ? match[2] : `https://www.animeworld.ac${match[2]}`,
-        href: match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`,
+        [span_8](start_span)title: match[3].trim(),[span_8](end_span)
+        [span_9](start_span)image: match[2].startsWith('http') ? match[2] : `https://www.animeworld.ac${match[2]}`,[span_9](end_span)
+        [span_10](start_span)href: match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`,[span_10](end_span)
       });
     }
 
-    return 
-JSON.stringify(transformedResults);
+    // Corretto: return e valore sulla stessa riga
+    [span_11](start_span)return JSON.stringify(transformedResults);[span_11](end_span)
+  } catch (error) {
+    [span_12](start_span)sendLog("Search error: " + error);[span_12](end_span)
+    [span_13](start_span)return JSON.stringify([{ title: "Error", image: "", href: "" }]);[span_13](end_span)
+  }
+}
+
+    return JSON.stringify(transformedResults);
   } catch (error) {
     sendLog("Search error: " + error);
     return JSON.stringify([{ title: "Error", image: "", href: "" }]);
