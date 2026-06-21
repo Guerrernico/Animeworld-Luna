@@ -57,73 +57,43 @@ async function extractDetails(url) {
 
     const episodes = [];
 
-    // 2. Cerchiamo il numero totale di episodi presenti nella scheda informativa di AnimeWorld
-    // Solitamente è strutturato come: <span class="type">Episodi:</span> <span class="info">24</span>
-    // o semplicemente "Episodi: XX" nel testo.
+    // 2. Cerchiamo il numero totale di episodi presenti nella pagina
     const totalEpMatch = html.match(/Episodi:\s*<\/span>\s*<span[^>]*>(\d+)/i) || 
                          html.match(/<strong>Episodi:<\/strong>\s*(\d+)/i) ||
-                         html.match(/<dd[^>]*>(\d+)<\/dd>/i); // Fallback generico per i metadati
+                         html.match(/<dd[^>]*>(\d+)<\/dd>/i);
 
     let totalEpisodes = 0;
     if (totalEpMatch && totalEpMatch[1]) {
       totalEpisodes = parseInt(totalEpMatch[1]);
     }
 
-    // 3. Se abbiamo trovato il numero totale di episodi (maggiore di 0), generiamo la lista dinamicamente come Aniwave
-    if (totalEpisodes > 0) {
-      for (let i = 1; i <= totalEpisodes; i++) {
-        // Genera l'URL corretto per l'episodio specifico. 
-        // Su AnimeWorld la struttura è del tipo: https://www.animeworld.ac/play/nome-anime.ID/episodio-X
-        // Se l'URL di partenza finisce già con l'episodio, puliamolo per evitare sovrascritture.
-        let baseUrl = url.split('/episodio-')[0];
-        
-        episodes.push({
-          title: `Episodio ${i}`,
-          href: `${baseUrl}/episodio-${i}`
-        });
-      }
-    } else {
-      // 4. ESTRREMO DI EMERGENZA (Se il sito è in corso d'opera o OAV/Film con un solo episodio senza contatore fisso)
-      // Cerchiamo qualsiasi link o elemento che contenga l'attributo "data-episode-num" o classi "episode"
-      const epRegex = /data-episode-num="(\d+)"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*data-episode-num="(\d+)"/g;
-      let match;
-      while ((match = epRegex.exec(html)) !== null) {
-        let epNum = match[1] || match[4];
-        let epHref = match[2] || match[3];
-        
-        if (!epHref.startsWith("http")) {
-          epHref = `https://www.animeworld.ac${epHref}`;
-        }
-        
-        episodes.push({
-          title: `Episodio ${epNum}`,
-          href: epHref
-        });
+    // Se non trova il numero totale, impostiamo un valore di fallback alto (es. 100) 
+    // o proviamo a contare i tag degli episodi reali nell'HTML
+    if (totalEpisodes === 0) {
+      const countMatches = html.match(/data-episode-num="(\d+)"/g);
+      if (countMatches) {
+        totalEpisodes = countMatches.length;
+      } else {
+        totalEpisodes = 1; // Fallback minimo se è un film o OAV singolo
       }
     }
 
-    // 5. Ultimo controllo di sicurezza: se la lista è ancora vuota, creiamo forzatamente l'Episodio 1 (evita il blocco su Episodio 0)
-    if (episodes.length === 0) {
-      let baseUrl = url.split('/episodio-')[0];
+    // 3. Generazione dell'array seguendo lo standard esatto compatibile con l'app
+    let baseUrl = url.split('/episodio-')[0];
+    
+    for (let i = 1; i <= totalEpisodes; i++) {
       episodes.push({
-        title: "Episodio 1",
-        href: `${baseUrl}/episodio-1`
+        name: `Episodio ${i}`,       // <-- Spesso l'app richiede 'name'
+        title: `Episodio ${i}`,      // <-- Mantieni anche 'title' per sicurezza
+        episode: i,                  // <-- Alcune app richiedono il numero puro
+        href: `${baseUrl}/episodio-${i}`
       });
     }
 
-    // Rimuove eventuali duplicati generati per errore dai fallback
-    const uniqueEpisodes = [];
-    const seen = new Set();
-    for (const ep of episodes) {
-      if (!seen.has(ep.href)) {
-        seen.add(ep.href);
-        uniqueEpisodes.push(ep);
-      }
-    }
-
+    // Struttura finale normalizzata
     const result = {
       description: description,
-      episodes: uniqueEpisodes
+      episodes: episodes
     };
 
     return JSON.stringify(result);
