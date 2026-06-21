@@ -111,14 +111,23 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
   try {
-    sendLog("Inizio estrazione streaming per URL: " + url);
+    sendLog("Inizio estrazione streaming avanzata per: " + url);
     
-    // Eseguiamo il fetch della pagina dell'episodio specifico scelto dall'utente
-    const response = await soraFetch(url);
+    // Configuriamo gli headers di base per simulare un browser vero ed evitare i blocchi di AnimeWorld
+    const requestOptions = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': url,
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    };
+
+    // Eseguiamo il fetch della pagina dell'episodio passando gli headers
+    const response = await soraFetch(url, requestOptions);
     const text = response.text ? await response.text() : response;
     const finishedList = [];
 
-    // Regex per identificare i ID dei server video
+    // Regex per estrarre data-id e data-name dei server video
     const serverRegex = /data-id="(\d+)"[^>]*data-name="([^"]+)"|data-name="([^"]+)"[^>]*data-id="(\d+)"/g;
     let match;
 
@@ -134,6 +143,7 @@ async function extractStreamUrl(url) {
       });
     }
 
+    // Fallback: se la regex non trova elementi dedicati, cerca un iframe generico nel testo della pagina
     if (finishedList.length === 0) {
       const iframeRegex = /<iframe[^>]+src="([^"]+)"/i;
       const iframeMatch = iframeRegex.exec(text);
@@ -149,25 +159,52 @@ async function extractStreamUrl(url) {
       if (supportedProviders.includes(video.provider) || video.provider === "DEFAULT") {
         let realLink = video.href;
         
+        // Se il link punta all'API di AnimeWorld, interroghiamola usando gli stessi headers protetti
         if (realLink.includes('/api/episode/server')) {
           try {
-            const apiRes = await soraFetch(realLink);
-            const apiData = typeof apiRes === 'string' ? JSON.parse(apiRes) : await apiRes.json();
+            const apiRes = await soraFetch(realLink, requestOptions);
+            const apiText = apiRes.text ? await apiRes.text() : apiRes;
+            
+            // Gestione sicura del parsing JSON (evita crash se il sito risponde con testo/html di errore)
+            let apiData;
+            try {
+              apiData = typeof apiText === 'string' ? JSON.parse(apiText) : apiText;
+            } catch(e) {
+              continue;
+            }
+
             if (apiData && apiData.link) {
               realLink = apiData.link;
             } else {
               continue;
             }
           } catch (e) {
+            sendLog("Errore API Server: " + e);
             continue;
           }
         }
+        
+        // Mappiamo il link reale associandolo al rispettivo hoster in minuscolo per il multiExtractor
         providerArray[realLink] = video.provider.toLowerCase();
       }
     }
 
+    sendLog("Link inviati al multiExtractor: " + JSON.stringify(providerArray));
+
+    // Passiamo i link reali decodificati al motore dell'applicazione
     let streams = await multiExtractor(providerArray);
-    return JSON.stringify({ streams: streams });
+    
+    // Uniformiamo l'output al formato richiesto dalle ultime versioni delle app di streaming
+    // Se l'array interno richiede una struttura specifica (es. streamUrl), la mappiamo
+    const formattedStreams = streams.map(stream => {
+      return {
+        title: stream.title || "Stream",
+        streamUrl: stream.streamUrl || stream.url || "",
+        headers: { 'Referer': url } // Passiamo il referer anche al player video finale
+      };
+    }).filter(s => s.streamUrl !== ""); // Rimuove eventuali flussi vuoti
+
+    return JSON.stringify({ streams: formattedStreams });
 
   } catch (error) {
     sendLog("ExtractStreamUrl error: " + error);
