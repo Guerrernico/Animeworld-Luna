@@ -55,52 +55,63 @@ async function extractDetails(url) {
       description = descMatch[1].replace(/<[^>]*>/g, "").trim();
     }
 
-    // 2. Estrazione degli episodi
     const episodes = [];
-    
-    // Su AnimeWorld gli episodi sono solitamente elencati dentro tag <a> o <li> con classe 'episode' o attributi data-id
-    // Questa regex cattura i link degli episodi e il loro numero visibile nel testo
-    const epRegex = /<a[^>]+class="[^"]*episode[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
-    let count = 1;
 
-    while ((match = epRegex.exec(html)) !== null) {
-      let epHref = match[1];
-      // Pulisce il testo per ottenere solo il numero dell'episodio
-      let epText = match[2].replace(/<[^>]*>/g, "").trim(); 
-      
-      // Se il testo estratto non è un numero valido, usa un contatore progressivo
-      let epNumber = parseInt(epText);
-      if (isNaN(epNumber)) {
-        epNumber = count;
-      }
+    // 2. Cerchiamo il numero totale di episodi presenti nella scheda informativa di AnimeWorld
+    // Solitamente è strutturato come: <span class="type">Episodi:</span> <span class="info">24</span>
+    // o semplicemente "Episodi: XX" nel testo.
+    const totalEpMatch = html.match(/Episodi:\s*<\/span>\s*<span[^>]*>(\d+)/i) || 
+                         html.match(/<strong>Episodi:<\/strong>\s*(\d+)/i) ||
+                         html.match(/<dd[^>]*>(\d+)<\/dd>/i); // Fallback generico per i metadati
 
-      // Assicurati che l'URL sia completo
-      if (!epHref.startsWith("http")) {
-        epHref = `https://www.animeworld.ac${epHref}`;
-      }
-
-      episodes.push({
-        title: `Episodio ${epNumber}`,
-        href: epHref
-      });
-      
-      count++;
+    let totalEpisodes = 0;
+    if (totalEpMatch && totalEpMatch[1]) {
+      totalEpisodes = parseInt(totalEpMatch[1]);
     }
 
-    // Fallback: Se la regex specifica fallisce, proviamo a cercare qualsiasi pulsante/link strutturato per gli episodi
-    if (episodes.length === 0) {
-      const fallbackRegex = /data-id="(\d+)"[^>]*data-episode-num="(\d+)"/g;
-      let fbMatch;
-      while ((fbMatch = fallbackRegex.exec(html)) !== null) {
+    // 3. Se abbiamo trovato il numero totale di episodi (maggiore di 0), generiamo la lista dinamicamente come Aniwave
+    if (totalEpisodes > 0) {
+      for (let i = 1; i <= totalEpisodes; i++) {
+        // Genera l'URL corretto per l'episodio specifico. 
+        // Su AnimeWorld la struttura è del tipo: https://www.animeworld.ac/play/nome-anime.ID/episodio-X
+        // Se l'URL di partenza finisce già con l'episodio, puliamolo per evitare sovrascritture.
+        let baseUrl = url.split('/episodio-')[0];
+        
         episodes.push({
-          title: `Episodio ${fbMatch[2]}`,
-          href: `${url}?ep=${fbMatch[2]}` // Genera un query parameter di fallback o mantiene l'URL base
+          title: `Episodio ${i}`,
+          href: `${baseUrl}/episodio-${i}`
+        });
+      }
+    } else {
+      // 4. ESTRREMO DI EMERGENZA (Se il sito è in corso d'opera o OAV/Film con un solo episodio senza contatore fisso)
+      // Cerchiamo qualsiasi link o elemento che contenga l'attributo "data-episode-num" o classi "episode"
+      const epRegex = /data-episode-num="(\d+)"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*data-episode-num="(\d+)"/g;
+      let match;
+      while ((match = epRegex.exec(html)) !== null) {
+        let epNum = match[1] || match[4];
+        let epHref = match[2] || match[3];
+        
+        if (!epHref.startsWith("http")) {
+          epHref = `https://www.animeworld.ac${epHref}`;
+        }
+        
+        episodes.push({
+          title: `Episodio ${epNum}`,
+          href: epHref
         });
       }
     }
-    
-    // Rimuove eventuali duplicati se la regex ha fatto doppi controlli
+
+    // 5. Ultimo controllo di sicurezza: se la lista è ancora vuota, creiamo forzatamente l'Episodio 1 (evita il blocco su Episodio 0)
+    if (episodes.length === 0) {
+      let baseUrl = url.split('/episodio-')[0];
+      episodes.push({
+        title: "Episodio 1",
+        href: `${baseUrl}/episodio-1`
+      });
+    }
+
+    // Rimuove eventuali duplicati generati per errore dai fallback
     const uniqueEpisodes = [];
     const seen = new Set();
     for (const ep of episodes) {
@@ -110,7 +121,6 @@ async function extractDetails(url) {
       }
     }
 
-    // Struttura finale richiesta dall'applicazione di streaming
     const result = {
       description: description,
       episodes: uniqueEpisodes
@@ -119,7 +129,7 @@ async function extractDetails(url) {
     return JSON.stringify(result);
   } catch (error) {
     sendLog("ExtractDetails error: " + error);
-    return JSON.stringify({ description: "Errore nel caricamento", episodes: [] });
+    return JSON.stringify({ description: "Errore nel caricamento dettagli", episodes: [] });
   }
 }
 
