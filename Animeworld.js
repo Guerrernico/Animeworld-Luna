@@ -7,7 +7,7 @@ async function searchResults(keyword) {
   try {
     const encodedKeyword = encodeURIComponent(keyword);
     // URL di ricerca standard su AnimeWorld
-    const searchUrl = `https://www.animeworld.ac/filter?keyword=${encodedKeyword}`;
+    const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;
     const responseText = await soraFetch(searchUrl);
     const text = responseText.text ? await responseText.text() : responseText;
 
