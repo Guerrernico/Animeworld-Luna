@@ -31,13 +31,6 @@ async function searchResults(keyword) {
   }
 }
 
-    return JSON.stringify(transformedResults);
-  } catch (error) {
-    sendLog("Search error: " + error);
-    return JSON.stringify([{ title: "Error", image: "", href: "" }]);
-  }
-}
-
 async function extractDetails(url) {
   try {
     const response = await fetch(url);
