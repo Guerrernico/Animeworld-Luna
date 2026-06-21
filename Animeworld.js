@@ -133,6 +133,54 @@ async function extractDetails(url) {
   }
 }
 
+async function extractEpisodes(url) {
+  try {
+    const response = await fetch(url);
+    const html = response.text ? await response.text() : response;
+    const finishedList = [];
+
+    // Cattura tutti i link agli episodi presenti nella lista/sidebar di AnimeWorld
+    // Struttura tipica: <a class="episode_element" data-id="..." href="/play/...">
+    const episodeRegex = /<a[^>]+class="[^"]*episode[^"]*"[^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/gs;
+    let match;
+
+    while ((match = episodeRegex.exec(html)) !== null) {
+      const epHref = match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`;
+      const epNumber = match[2].trim();
+      
+      finishedList.push({
+        number: epNumber,
+        href: epHref,
+        title: `Episodio ${epNumber}`
+      });
+    }
+
+    // Se la regex HTML fallisce o la pagina Ã¨ un player singolo, cerchiamo l'ID dall'oggetto globale per richiedere l'elenco completo
+    if (finishedList.length === 0) {
+      const idRegex = /window\.animeId\s*=\s*"(\d+)"/;
+      const idMatch = idRegex.exec(html);
+      if (idMatch) {
+        // Alcune implementazioni di moduli richiedono l'endpoint interno degli episodi via API se disponibile
+        // Altrimenti, estraiamo l'episodio corrente basandoci sui meta tag LD+JSON presenti nel dump
+        const currentEpRegex = /"episodeNumber":\s*"(\d+)"/;
+        const currentEpMatch = currentEpRegex.exec(html);
+        if (currentEpMatch) {
+          finishedList.push({
+            number: currentEpMatch[1],
+            href: url,
+            title: `Episodio ${currentEpMatch[1]}`
+          });
+        }
+      }
+    }
+
+    return JSON.stringify(finishedList);
+  } catch (error) {
+    sendLog("Episodes error: " + error);
+    return JSON.stringify([{ number: "0", href: "" }]);
+  }
+}
+
 async function extractStreamUrl(url) {
   try {
     const response = await fetch(url);
