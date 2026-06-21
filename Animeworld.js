@@ -445,135 +445,27 @@ function globalExtractor(providers) {
   return null;
 }
 
-async function multiExtractor(providers) {
-  /* this scheme should be returned as a JSON object
-  {
-  "streams": [
-  {
-    "title": "FileMoon",
-    "streamUrl": "https://filemoon.example/stream1.m3u8",
-  },
-  {
-    "title": "StreamWish",
-    "streamUrl": "https://streamwish.example/stream2.m3u8",
-  },
-  {
-    "title": "Okru",
-    "streamUrl": "https://okru.example/stream3.m3u8",
-    "headers": { // Optional headers for the stream
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-      "Referer": "https://okru.example/",
-    },
-  },
-  {
-    "title": "MP4",
-    "streamUrl": "https://mp4upload.example/stream4.mp4",
-  },
-  {
-    "title": "Default",
-    "streamUrl": "https://default.example/stream5.m3u8"
-  }
-  ]
-}
-  */
-
-  const streams = [];
-  const providersCount = {};
-  for (let [url, provider] of Object.entries(providers)) {
-    try {
-      // if provider starts with "direct-", then add the url to the streams array directly
-      if (provider.startsWith("direct-")) {
-        const directName = provider.slice(7); // remove "direct-" prefix
-        const title = (directName && directName.length > 0) ? directName : "Direct";
-        streams.push({
-          title: title,
-          streamUrl: url
-        });
-        continue; // skip to the next provider
-      }
-      if (provider.startsWith("direct")) {
-        provider = provider.slice(7); // remove "direct-" prefix
-        const title = (provider && provider.length > 0) ? provider : "Direct";
-        streams.push({
-          title: title,
-          streamUrl: url
-        });
-        continue; // skip to the next provider
-      }
-
-      let customName = null; // to store the custom name if provided
-
-      // if the provider has - then split it and use the first part as the provider name
-      if (provider.includes("-")) {
-        const parts = provider.split("-");
-        provider = parts[0]; // use the first part as the provider name
-        customName = parts.slice(1).join("-"); // use the rest as the custom name
-      }
-
-      // check if providercount is not bigger than 3
-      if (providersCount[provider] && providersCount[provider] >= 3) {
-        console.log(`Skipping ${provider} as it has already 3 streams`);
-        continue;
-      }
-      let result = await extractStreamUrlByProvider(url, provider);
-      let streamUrl = null;
-      let headers = null;
-
-      // Check if result is an object with streamUrl and optional headers
-      if (result && typeof result === "object" && !Array.isArray(result) && result.streamUrl) {
-        streamUrl = result.streamUrl;
-        headers = result.headers || null;
-      } else if (result && Array.isArray(result)) {
-        const httpStream = result.find((url) => url.startsWith("http"));
-        if (httpStream) {
-          streamUrl = httpStream;
+async function multiExtractor(providerArray) {
+    let streams = [];
+    for (const [url, provider] of Object.entries(providerArray)) {
+        sendLog(`Processing provider: ${provider} with URL: ${url}`);
+        try {
+            if (provider === "streamtape") {
+                let link = await streamtape(url);
+                if (link) streams.push({ quality: "720p", link: link, type: "mp4" });
+            } else if (provider === "voe") {
+                let link = await voe(url);
+                if (link) streams.push({ quality: "1080p", link: link, type: "hls" });
+            } else if (provider === "filemoon") {
+                let link = await filemoon(url); // Se hai o aggiungi l'estrattore per filemoon
+                if (link) streams.push({ quality: "1080p", link: link, type: "hls" });
+            }
+            // Puoi aggiungere altri hoster supportati da AnimeWorld qui...
+        } catch (e) {
+            sendLog(`Error extracting from ${provider}: ${e}`);
         }
-      } else if (result && typeof result === "string") {
-        streamUrl = result;
-      }
-
-      // check if streamUrl is valid
-      if (
-        !streamUrl ||
-        typeof streamUrl !== "string" ||
-        !streamUrl.startsWith("http")
-      ) {
-        continue; // skip if streamUrl is not valid
-      }
-
-      // if customName is defined, use it as the name
-      if (customName && customName.length > 0) {
-        provider = customName;
-      }
-
-      let title;
-      if (providersCount[provider]) {
-        providersCount[provider]++;
-        title = provider.charAt(0).toUpperCase() +
-            provider.slice(1) +
-            "-" +
-            (providersCount[provider] - 1); // add a number to the provider name
-      } else {
-        providersCount[provider] = 1;
-        title = provider.charAt(0).toUpperCase() + provider.slice(1);
-      }
-      
-      const streamObject = {
-        title: title,
-        streamUrl: streamUrl
-      };
-      
-      // Add headers if they exist
-      if (headers && typeof headers === "object" && Object.keys(headers).length > 0) {
-        streamObject.headers = headers;
-      }
-      
-      streams.push(streamObject);
-    } catch (error) {
-      // Ignore the error and try the next provider
     }
-  }
-  return streams;
+    return streams;
 }
 
 async function extractStreamUrlByProvider(url, provider) {
