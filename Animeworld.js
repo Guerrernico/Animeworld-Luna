@@ -153,16 +153,35 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
   try {
-    const response = await fetch(url);
+    sendLog("URL ricevuto dall'app: " + url);
+    
+    let targetUrl = url;
+
+    // Se l'app passa l'URL generico della serie senza specificare l'episodio nel link,
+    // proviamo a capire se l'applicazione ha inserito il numero dell'episodio da qualche parte (es. nei log o in variabili globali)
+    // o se l'URL originale contiene già un'indicazione (es. /episodio-X o ?ep=X)
+    if (!targetUrl.includes('/episodio-')) {
+      // CONTROLLO DI SICUREZZA: Chiediamo prima alla pagina principale dell'anime l'HTML completo
+      const mainResponse = await soraFetch(targetUrl);
+      const mainHtml = mainResponse.text ? await mainResponse.text() : mainResponse;
+      
+      // Cerchiamo il primo episodio disponibile o l'ID dell'episodio attivo se il sito reindirizza automaticamente
+      const firstEpMatch = mainHtml.match(/href="([^"]+?\/episodio-1)"/) || mainHtml.match(/href="([^"]+?\/episodio-\d+)"/);
+      if (firstEpMatch) {
+        targetUrl = firstEpMatch[1].startsWith('http') ? firstEpMatch[1] : `https://www.animeworld.ac${firstEpMatch[1]}`;
+      }
+    }
+
+    // Ora che abbiamo l'URL dell'episodio (o il fallback), eseguiamo il fetch della pagina video vera e propria
+    const response = await soraFetch(targetUrl);
     const text = response.text ? await response.text() : response;
     const finishedList = [];
 
-    // Nuova Regex ultra-flessibile: intercetta l'id e il nome del server ovunque siano posizionati nel tag
+    // Regex flessibile per estrarre i server video (data-id e data-name)
     const serverRegex = /data-id="(\d+)"[^>]*data-name="([^"]+)"|data-name="([^"]+)"[^>]*data-id="(\d+)"/g;
     let match;
 
     while ((match = serverRegex.exec(text)) !== null) {
-      // Gestiamo il fatto che l'id o il nome possano essere arrivati invertiti nella regex
       const serverId = match[1] || match[4];
       const serverName = (match[2] || match[3]).toUpperCase().trim();
 
@@ -174,7 +193,7 @@ async function extractStreamUrl(url) {
       });
     }
 
-    // Fallback: se la lista è vuota, cerca l'iframe del player principale
+    // Fallback se la lista dei server è vuota: cerchiamo direttamente l'iframe del player principale
     if (finishedList.length === 0) {
       const iframeRegex = /<iframe[^>]+src="([^"]+)"/i;
       const iframeMatch = iframeRegex.exec(text);
@@ -187,15 +206,14 @@ async function extractStreamUrl(url) {
       }
     }
 
-    // Filtriamo i provider trovati basandoci solo su quelli supportati dal tuo multiExtractor interno
-    let newProviderArray = {};
+    // Popoliamo i link per il multiExtractor dell'app
+    let providerArray = {};
     const supportedProviders = ["FILEMOON", "STREAMTAPE", "VOE", "DOODSTREAM"];
     
     for (const video of finishedList) {
       if (supportedProviders.includes(video.provider) || video.provider === "DEFAULT") {
         let realLink = video.href;
         
-        // Se il link è l'API interna di AnimeWorld, facciamo subito il fetch per ottenere l'URL reale (iframe)
         if (realLink.includes('/api/episode/server')) {
           try {
             const apiRes = await soraFetch(realLink);
@@ -203,21 +221,18 @@ async function extractStreamUrl(url) {
             if (apiData && apiData.link) {
               realLink = apiData.link;
             } else {
-              continue; // Salta se l'API non risponde correttamente
+              continue;
             }
           } catch (e) {
-            sendLog("Error fetching server API: " + e);
             continue;
           }
         }
         
-        // Popoliamo l'oggetto da passare al multiExtractor
-        newProviderArray[realLink] = video.provider.toLowerCase();
+        providerArray[realLink] = video.provider.toLowerCase();
       }
     }
 
-    // Invia i link reali convertiti al multiExtractor globale dello script
-    let streams = await multiExtractor(newProviderArray);
+    let streams = await multiExtractor(providerArray);
     return JSON.stringify({ streams: streams });
 
   } catch (error) {
