@@ -10,7 +10,7 @@
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://www.animeworld.ac",
-    "searchBaseUrl": "https://www.animeworld.ac/search?=%s",
+    "searchBaseUrl": "https://www.animeworld.ac/search?keyword=%s",
     "scriptUrl": "https://raw.githubusercontent.com/Guerrernico/Animeworld-Luna/main/Animeworld.js",
     "type": "anime",
     "downloadSupport": false,
