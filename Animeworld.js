@@ -17,7 +17,7 @@ async function searchResults(keyword) {
     const searchRegex = /<a\s+class="poster"[^>]*href="([^"]+)"[^>]*>.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"/gs;
     let match;
     
-    while ((match = searchRegex.exec(text)) !== null) {
+        while ((match = searchRegex.exec(text)) !== null) {
       transformedResults.push({
         title: match[3].trim(),
         image: match[2].startsWith('http') ? match[2] : `https://www.animeworld.ac${match[2]}`,
@@ -25,7 +25,8 @@ async function searchResults(keyword) {
       });
     }
 
-    return JSON.stringify(transformedResults);
+    return 
+JSON.stringify(transformedResults);
   } catch (error) {
     sendLog("Search error: " + error);
     return JSON.stringify([{ title: "Error", image: "", href: "" }]);
