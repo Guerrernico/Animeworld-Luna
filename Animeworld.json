@@ -1,6 +1,6 @@
 {
   "sourceName": "Animeworld",
-  "iconUrl": "https://github.com/Guerrernico/Animeworld--Luna/raw/branch/main/animeworld.png",
+  "iconUrl": "https://github.com/Guerrernico/Animeworld-Luna/raw/branch/main/animeworld.png",
   "author": {
     "name": "Guerrernico",
     "icon": "https://www.fisheries.noaa.gov/s3//styles/original/s3/2022-09/640x427-Shrimp-Pink-NOAAFisheries.png?itok=uTK6p5TL",
@@ -12,7 +12,7 @@
   "quality": "1080p",
   "baseUrl": "https://www.animeworld.ac",
   "searchBaseUrl": "https://www.animeworld.ac/search?keyword=%s",
-  "scriptUrl": "https://github.com/Guerrernico/Animeworld--Luna/raw/branch/main/Animeworld.js",
+  "scriptUrl": "https://github.com/Guerrernico/Animeworld-Luna/raw/branch/main/Animeworld.js",
   "type": "anime",
   "downloadSupport": true,
   "asyncJS": true
