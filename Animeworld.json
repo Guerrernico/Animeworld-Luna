@@ -16,9 +16,5 @@
   "downloadSupport": true,
   "asyncJS": true
   "streamAsyncJS": false,
-  "type": "anime",
-  "supportsMojuru": true,
-  "supportsSora": true,
-  "supportsLuna": true,
-  "supportsSoru": true
+  "type": "anime"
 }
