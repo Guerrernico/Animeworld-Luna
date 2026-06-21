@@ -4,30 +4,42 @@
 
 async function searchResults(keyword) {
   try {
-    [span_1](start_span)const encodedKeyword = encodeURIComponent(keyword);[span_1](end_span)
+    const encodedKeyword = encodeURIComponent(keyword);
     // URL di ricerca standard su AnimeWorld
-    [span_2](start_span)const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;[span_2](end_span)
-    [span_3](start_span)const responseText = await soraFetch(searchUrl);[span_3](end_span)
-    [span_4](start_span)const text = responseText.text ? await responseText.text() : responseText;[span_4](end_span)
+    const searchUrl = `https://www.animeworld.ac/search?keyword=${encodedKeyword}`;
+    const responseText = await soraFetch(searchUrl);
+    const text = responseText.text ? await responseText.text() : responseText;
 
-    [span_5](start_span)const transformedResults = [];[span_5](end_span)
-    // Regex per estrarre il link (href), l'immagine di copertina (src) e il titolo (alt o title) dei risultati
-    [span_6](start_span)const searchRegex = /<a\s+class="poster"[^>]*href="([^"]+)"[^>]*>.*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"/gs;[span_6](end_span)
-    let match;
+    const transformedResults = [];
     
-    [span_7](start_span)while ((match = searchRegex.exec(text)) !== null) {[span_7](end_span)
-      transformedResults.push({
-        [span_8](start_span)title: match[3].trim(),[span_8](end_span)
-        [span_9](start_span)image: match[2].startsWith('http') ? match[2] : `https://www.animeworld.ac${match[2]}`,[span_9](end_span)
-        [span_10](start_span)href: match[1].startsWith('http') ? match[1] : `https://www.animeworld.ac${match[1]}`,[span_10](end_span)
-      });
+    // 1. Catturiamo l'intero blocco dell'elemento (il "poster") dal codice HTML
+    const itemRegex = /<a[^>]+class="[^"]*poster[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+    let itemMatch;
+    
+    while ((itemMatch = itemRegex.exec(text)) !== null) {
+      const itemHtml = itemMatch[0]; // Tutto il tag <a> incluso il contenuto
+      const innerContent = itemMatch[1]; // Solo cosa c'è dentro l'anchor tag
+
+      // 2. Estraiamo il link (href) in modo isolato dal tag principale
+      const hrefMatch = itemHtml.match(/href="([^"]+)"/);
+      // 3. Estraiamo l'immagine (src)
+      const srcMatch = innerContent.match(/src="([^"]+)"/);
+      // 4. Estraiamo il titolo (cercando prima nell'alt dell'immagine, poi eventualmente nel title)
+      const altMatch = innerContent.match(/alt="([^"]+)"/) || innerContent.match(/title="([^"]+)"/);
+
+      if (hrefMatch && srcMatch && altMatch) {
+        const title = altMatch[1].trim();
+        const image = srcMatch[1].startsWith('http') ? srcMatch[1] : `https://www.animeworld.ac${srcMatch[1]}`;
+        const href = hrefMatch[1].startsWith('http') ? hrefMatch[1] : `https://www.animeworld.ac${hrefMatch[1]}`;
+
+        transformedResults.push({ title, image, href });
+      }
     }
 
-    // Corretto: return e valore sulla stessa riga
-    [span_11](start_span)return JSON.stringify(transformedResults);[span_11](end_span)
+    return JSON.stringify(transformedResults);
   } catch (error) {
-    [span_12](start_span)sendLog("Search error: " + error);[span_12](end_span)
-    [span_13](start_span)return JSON.stringify([{ title: "Error", image: "", href: "" }]);[span_13](end_span)
+    sendLog("Search error: " + error);
+    return JSON.stringify([{ title: "Error", image: "", href: "" }]);
   }
 }
 
