@@ -6,17 +6,9 @@ async function searchResults(keyword) {
         const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        const filmListRegex =
-        /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
-        const filmListMatch = html.match(filmListRegex);
-        
-        if (!filmListMatch) {
-            return JSON.stringify(results);
-        }
-        
-        const filmListContent = filmListMatch[1];
-        const itemRegex = /<div class="item">[\s\S]*?<\/div>[\s]*<\/div>/g;
-        const items = filmListContent.match(itemRegex) || [];
+        // MODIFICA: Invece di isolare una singola sezione, cerchiamo TUTTI gli item nella pagina
+        const itemRegex = /<div class="item">[\s\S]*?<\/div>\s*<\/div>/g;
+        const items = html.match(itemRegex) || [];
         
         items.forEach((itemHtml) => {
             const imgMatch = itemHtml.match(/src="([^"]+)"/);
@@ -40,14 +32,19 @@ async function searchResults(keyword) {
                     if (href.startsWith("/")) {
                         href = baseUrl + href;
                     } else {
-                        href = baseUrl + "/" + href;
+                        baseUrl + "/" + href;
                     }
                 }
-                results.push({
-                title: title.trim(),
-                image: imageUrl,
-                href: href,
-                });
+                
+                // Evita di inserire duplicati se un titolo appare in più sezioni
+                const isDuplicate = results.some(r => r.href === href);
+                if (!isDuplicate) {
+                    results.push({
+                        title: title.trim(),
+                        image: imageUrl,
+                        href: href,
+                    });
+                }
             }
         });
         
