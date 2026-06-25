@@ -6,52 +6,42 @@ async function searchResults(keyword) {
         const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        const filmListRegex =
-        /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
-        const filmListMatch = html.match(filmListRegex);
+        // Regex robusta per catturare l'href, l'immagine e il titolo di ogni "item" nella film-list
+        // Cattura: g1 = href, g2 = src dell'immagine, g3 = titolo
+        const regex = /<div class="item">[\s\S]*?<a\s+[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img\s+[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a\s+[^>]*class="name"[^>]*>([^<]+)<\/a>/g;
         
-        if (!filmListMatch) {
-            return JSON.stringify(results);
+        let match;
+        while ((match = regex.exec(html)) !== null) {
+            let href = match[1].trim();
+            let imageUrl = match[2].trim();
+            const title = match[3].trim();
+            
+            // Sistemazione dei link relativi per l'immagine
+            if (!imageUrl.startsWith("https")) {
+                if (imageUrl.startsWith("/")) {
+                    imageUrl = baseUrl + imageUrl;
+                } else {
+                    imageUrl = baseUrl + "/" + imageUrl;
+                }
+            }
+            
+            // Sistemazione dei link relativi per l'href del dettaglio
+            if (!href.startsWith("https")) {
+                if (href.startsWith("/")) {
+                    href = baseUrl + href;
+                } else {
+                    baseUrl + "/" + href;
+                }
+            }
+            
+            results.push({
+                title: title,
+                image: imageUrl,
+                href: href
+            });
         }
         
-        const filmListContent = filmListMatch[1];
-        const itemRegex = /<div class="item">[\s\S]*?<\/div>[\s]*<\/div>/g;
-        const items = filmListContent.match(itemRegex) || [];
-        
-        items.forEach((itemHtml) => {
-            const imgMatch = itemHtml.match(/src="([^"]+)"/);
-            let imageUrl = imgMatch ? imgMatch[1] : "";
-            
-            const titleMatch = itemHtml.match(/class="name">([^<]+)</);
-            const title = titleMatch ? titleMatch[1] : "";
-            
-            const hrefMatch = itemHtml.match(/href="([^"]+)"/);
-            let href = hrefMatch ? hrefMatch[1] : "";
-            
-            if (imageUrl && title && href) {
-                if (!imageUrl.startsWith("https")) {
-                    if (imageUrl.startsWith("/")) {
-                        imageUrl = baseUrl + imageUrl;
-                    } else {
-                        imageUrl = baseUrl + "/" + href;
-                    }
-                }
-                if (!href.startsWith("https")) {
-                    if (href.startsWith("/")) {
-                        href = baseUrl + href;
-                    } else {
-                        href = baseUrl + "/" + href;
-                    }
-                }
-                results.push({
-                title: title.trim(),
-                image: imageUrl,
-                href: href,
-                });
-            }
-        });
-        
-        console.log(JSON.stringify(results));
+        console.log("Risultati trovati:", JSON.stringify(results));
         return JSON.stringify(results);
     } catch (error) {
         console.log("Search error:", error);
