@@ -95,22 +95,33 @@ async function extractEpisodes(url) {
         const html = await response.text();
         
         const episodes = [];
-        const baseUrl = "https://animeworld.ac";
+        const baseUrl = "https://www.animeworld.ac";
         
-        const serverActiveRegex = /<div class="server active"[^>]*>([\s\S]*?)<\/ul>\s*<\/div>/;
-        const serverActiveMatch = html.match(serverActiveRegex);
-        
-        if (!serverActiveMatch) {
+        // 1. Verifichiamo se si tratta di un Film (Movie) o di un OAV a episodio singolo
+        // AnimeWorld inserisce spesso "Movie" o "Film" nelle informazioni della scheda, oppure controlliamo se mancano del tutto i link degli episodi nell'HTML
+        const isMovie = html.includes("<li><label>Tipo:</label> <span>Movie</span>") || 
+                        html.includes("<li><label>Tipo:</label> <span>Film</span>") ||
+                        !html.includes("data-episode-num=");
+
+        if (isMovie) {
+            // Se è un film, l'URL principale è già la pagina del player.
+            // Restituiamo un solo "episodio" che rimanda direttamente all'URL di base della scheda
+            episodes.push({
+                href: url,
+                number: 1
+            });
+            
+            sendLog("Rilevato Film/Movie. Generato episodio singolo diretto.");
             return JSON.stringify(episodes);
         }
         
-        const serverActiveContent = serverActiveMatch[1];
-        const episodeRegex = /<li class="episode">\s*<a[^>]*?href="([^"]+)"[^>]*?>([^<]+)<\/a>/g;
+        // 2. Se NON è un film, procediamo con la normale estrazione degli episodi dell'anime/serie
+        const regex = /<a[^>]+data-episode-num="(\d+)"[^>]+href="([^"]+)"/g;
         let match;
         
-        while ((match = episodeRegex.exec(serverActiveContent)) !== null) {
-            let href = match[1];
-            const number = parseInt(match[2], 10);
+        while ((match = regex.exec(html)) !== null) {
+            const number = parseInt(match[1], 10);
+            let href = match[2];
             
             if (!href.startsWith("https")) {
                 if (href.startsWith("/")) {
@@ -121,14 +132,26 @@ async function extractEpisodes(url) {
             }
             
             episodes.push({
-            href: href,
-            number: number,
+                href: href,
+                number: number
+            });
+        }
+        
+        // Ordinamento di sicurezza degli episodi (dal primo all'ultimo)
+        episodes.sort((a, b) => a.number - b.number);
+        
+        // Fallback di sicurezza: se la regex degli episodi fallisce ma non era un film rilevato prima,
+        // evitiamo comunque di lasciare la lista vuota rimandando all'URL principale
+        if (episodes.length === 0) {
+            episodes.push({
+                href: url,
+                number: 1
             });
         }
         
         return JSON.stringify(episodes);
     } catch (error) {
-        console.log("Episodes error:", error);
+        sendLog("Episodes error: " + error);
         return JSON.stringify([]);
     }
 }
