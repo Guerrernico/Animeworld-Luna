@@ -3,10 +3,14 @@ async function searchResults(keyword) {
     const baseUrl = "https://animeworld.ac";
     
     try {
-        const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
+        // Usiamo /filter invece di /search. Questo endpoint costringe il server
+        // a restituire la struttura standard ad elenco (film-list) in modo pulito.
+        const response = await soraFetch(`${baseUrl}/filter?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        const regex = /<div class="item">[\s\S]*?<a\s+[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img\s+[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a\s+[^>]*class="name"[^>]*>([^<]+)<\/a>/g;
+        // Regex ultra-flessibile: intercetta l'elemento a prescindere da quanti spazi 
+        // o attributi extra (come data-id, data-jtitle) i programmatori del sito abbiano inserito.
+        const regex = /<div[^>]*class="item"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a[^>]*class="name"[^>]*>([\s\S]*?)<\/a>/g;
         
         let match;
         const lowerKeyword = keyword.toLowerCase().trim();
@@ -14,15 +18,16 @@ async function searchResults(keyword) {
         while ((match = regex.exec(html)) !== null) {
             let href = match[1].trim();
             let imageUrl = match[2].trim();
-            const title = match[3].trim();
+            // Puliamo il titolo da eventuali tag interni o spazi strani
+            const title = match[3].replace(/<[^>]*>/g, "").trim(); 
             const lowerTitle = title.toLowerCase();
 
-            // FILTRO DI SIMILITUDINE: Se il titolo restituito dal sito non contiene 
-            // la parola chiave che hai cercato, lo scartiamo immediatamente.
-            if (!lowerTitle.includes(lowerKeyword)) {
+            // Controllo di corrispondenza: la parola deve essere presente nel titolo italiano o nell'URL
+            if (!lowerTitle.includes(lowerKeyword) && !href.toLowerCase().includes(lowerKeyword)) {
                 continue; 
             }
             
+            // Correzione dei link relativi
             if (!imageUrl.startsWith("https")) {
                 imageUrl = imageUrl.startsWith("/") ? baseUrl + imageUrl : baseUrl + "/" + imageUrl;
             }
@@ -37,10 +42,41 @@ async function searchResults(keyword) {
             });
         }
         
-        console.log("Risultati filtrati:", JSON.stringify(results));
+        // Se la ricerca con filtro non ha prodotto nulla, facciamo un fallback sulla ricerca classica
+        if (results.length === 0) {
+            console.log("Nessun risultato con /filter, provo fallback su /search...");
+            return await backupSearch(keyword, baseUrl);
+        }
+
+        console.log("Risultati trovati:", JSON.stringify(results));
         return JSON.stringify(results);
     } catch (error) {
         console.log("Search error:", error);
+        return JSON.stringify([]);
+    }
+}
+
+// Funzione di riserva (nel caso in cui il filtro fallisca o il sito richieda /search)
+async function backupSearch(keyword, baseUrl) {
+    const results = [];
+    try {
+        const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
+        const html = await response.text();
+        const regex = /<div[^>]*class="item"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a[^>]*class="name"[^>]*>([\s\S]*?)<\/a>/g;
+        
+        let match;
+        while ((match = regex.exec(html)) !== null) {
+            let href = match[1].trim();
+            let imageUrl = match[2].trim();
+            const title = match[3].replace(/<[^>]*>/g, "").trim();
+
+            if (!imageUrl.startsWith("https")) imageUrl = imageUrl.startsWith("/") ? baseUrl + imageUrl : baseUrl + "/" + imageUrl;
+            if (!href.startsWith("https")) href = href.startsWith("/") ? baseUrl + href : baseUrl + "/" + href;
+
+            results.push({ title, image: imageUrl, href });
+        }
+        return JSON.stringify(results);
+    } catch (e) {
         return JSON.stringify([]);
     }
 }
