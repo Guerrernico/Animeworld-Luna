@@ -6,9 +6,26 @@ async function searchResults(keyword) {
         const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        // MODIFICA: Invece di isolare una singola sezione, cerchiamo TUTTI gli item nella pagina
+        // 1. Isoliaramo l'area CONTENITORE dei risultati di ricerca (escludendo le sidebar laterali)
+        // Solitamente su AnimeWorld l'area di ricerca principale è dentro un div con id o classe specifica, 
+        // o racchiusa tra il main-content. Usiamo un filtro più mirato:
+        const mainContentRegex = /<div class="col-xs-12 col-sm-12 col-md-8 col-lg-9 col-xl-9(?: left-sidebar)?">([\s\S]*?)<\/div>\s*<\/div>\s*<div class="col-xs-12 col-sm-12 col-md-4 col-lg-3 col-xl-3/;
+        let searchArea = html;
+        
+        const mainMatch = html.match(mainContentRegex);
+        if (mainMatch) {
+            searchArea = mainMatch[1]; // Prendiamo solo la colonna di sinistra (risultati)
+        } else {
+            // Alternativa se la struttura cambia: prendiamo solo i blocchi dei risultati effettivi
+            // Evitando di leggere tutta la pagina a vuoto
+            const alternativeRegex = /<div class="film-list">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/;
+            const altMatch = html.match(alternativeRegex);
+            if (altMatch) searchArea = altMatch[0];
+        }
+        
+        // 2. Ora estraiamo gli item SOLO dall'area protetta dei risultati reali
         const itemRegex = /<div class="item">[\s\S]*?<\/div>\s*<\/div>/g;
-        const items = html.match(itemRegex) || [];
+        const items = searchArea.match(itemRegex) || [];
         
         items.forEach((itemHtml) => {
             const imgMatch = itemHtml.match(/src="([^"]+)"/);
@@ -32,11 +49,10 @@ async function searchResults(keyword) {
                     if (href.startsWith("/")) {
                         href = baseUrl + href;
                     } else {
-                        baseUrl + "/" + href;
+                        href = baseUrl + "/" + href;
                     }
                 }
                 
-                // Evita di inserire duplicati se un titolo appare in più sezioni
                 const isDuplicate = results.some(r => r.href === href);
                 if (!isDuplicate) {
                     results.push({
