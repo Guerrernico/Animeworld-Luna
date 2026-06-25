@@ -1,61 +1,30 @@
 async function searchResults(keyword) {
-    const results = [];
-    const baseUrl = "https://animeworld.ac";
-    
     try {
-        const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
-        const html = await response.text();
-        
-        const filmListRegex =
-        /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
-        const filmListMatch = html.match(filmListRegex);
-        
-        if (!filmListMatch) {
-            return JSON.stringify(results);
-        }
-        
-        const filmListContent = filmListMatch[1];
-        const itemRegex = /<div class="item">[\s\S]*?<\/div>[\s]*<\/div>/g;
-        const items = filmListContent.match(itemRegex) || [];
-        
-        items.forEach((itemHtml) => {
-            const imgMatch = itemHtml.match(/src="([^"]+)"/);
-            let imageUrl = imgMatch ? imgMatch[1] : "";
-            
-            const titleMatch = itemHtml.match(/class="name">([^<]+)</);
-            const title = titleMatch ? titleMatch[1] : "";
-            
-            const hrefMatch = itemHtml.match(/href="([^"]+)"/);
-            let href = hrefMatch ? hrefMatch[1] : "";
-            
-            if (imageUrl && title && href) {
-                if (!imageUrl.startsWith("https")) {
-                    if (imageUrl.startsWith("/")) {
-                        imageUrl = baseUrl + imageUrl;
-                    } else {
-                        imageUrl = baseUrl + "/" + href;
-                    }
-                }
-                if (!href.startsWith("https")) {
-                    if (href.startsWith("/")) {
-                        href = baseUrl + href;
-                    } else {
-                        href = baseUrl + "/" + href;
-                    }
-                }
-                results.push({
-                title: title.trim(),
-                image: imageUrl,
-                href: href,
-                });
+        const encodedKeyword = encodeURIComponent(keyword);
+        const responseText = await soraFetch(`https://www.animeworld.ac/search?keyword=${encodedKeyword}`);
+        const html = await responseText.text();
+
+        const regex = /<div\s+class="item\s*">[\s\S]*?<a\s+href="([^"]+)">[\s\S]*?<img\s+src="([^"]+)"[^>]*>[\s\S]*?<a\s+class="name\s+d-title"[^>]*>([^<]+)<\/a>/g;
+
+        const results = [];
+        let match;
+
+        while ((match = regex.exec(html)) !== null) {
+            if (match[3].trim() === "Omiai Aite Wa Oshiego Tsuyokina Mondaiji") {
+                continue;
             }
-        });
-        
-        console.log(JSON.stringify(results));
+
+            results.push({
+                title: match[3].trim(),
+                image: match[2].trim(),
+                href: `https://www.animeworld.ac${match[1].trim()}`
+            });
+        }
+
         return JSON.stringify(results);
     } catch (error) {
-        console.log("Search error:", error);
-        return JSON.stringify([]);
+        console.log('Fetch error in searchResults:', error);
+        return JSON.stringify([{ title: 'Error', image: '', href: '' }]);
     }
 }
 
