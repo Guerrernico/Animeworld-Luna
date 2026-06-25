@@ -6,32 +6,28 @@ async function searchResults(keyword) {
         const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        // Regex robusta per catturare l'href, l'immagine e il titolo di ogni "item" nella film-list
-        // Cattura: g1 = href, g2 = src dell'immagine, g3 = titolo
         const regex = /<div class="item">[\s\S]*?<a\s+[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img\s+[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a\s+[^>]*class="name"[^>]*>([^<]+)<\/a>/g;
         
         let match;
+        const lowerKeyword = keyword.toLowerCase().trim();
+
         while ((match = regex.exec(html)) !== null) {
             let href = match[1].trim();
             let imageUrl = match[2].trim();
             const title = match[3].trim();
-            
-            // Sistemazione dei link relativi per l'immagine
-            if (!imageUrl.startsWith("https")) {
-                if (imageUrl.startsWith("/")) {
-                    imageUrl = baseUrl + imageUrl;
-                } else {
-                    imageUrl = baseUrl + "/" + imageUrl;
-                }
+            const lowerTitle = title.toLowerCase();
+
+            // FILTRO DI SIMILITUDINE: Se il titolo restituito dal sito non contiene 
+            // la parola chiave che hai cercato, lo scartiamo immediatamente.
+            if (!lowerTitle.includes(lowerKeyword)) {
+                continue; 
             }
             
-            // Sistemazione dei link relativi per l'href del dettaglio
+            if (!imageUrl.startsWith("https")) {
+                imageUrl = imageUrl.startsWith("/") ? baseUrl + imageUrl : baseUrl + "/" + imageUrl;
+            }
             if (!href.startsWith("https")) {
-                if (href.startsWith("/")) {
-                    href = baseUrl + href;
-                } else {
-                    baseUrl + "/" + href;
-                }
+                href = href.startsWith("/") ? baseUrl + href : baseUrl + "/" + href;
             }
             
             results.push({
@@ -41,7 +37,7 @@ async function searchResults(keyword) {
             });
         }
         
-        console.log("Risultati trovati:", JSON.stringify(results));
+        console.log("Risultati filtrati:", JSON.stringify(results));
         return JSON.stringify(results);
     } catch (error) {
         console.log("Search error:", error);
