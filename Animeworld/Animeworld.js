@@ -6,8 +6,7 @@ async function searchResults(keyword) {
         const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        const filmListRegex =
-        /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
+        const filmListRegex = /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
         const filmListMatch = html.match(filmListRegex);
         
         if (!filmListMatch) {
@@ -36,6 +35,7 @@ async function searchResults(keyword) {
                         imageUrl = baseUrl + "/" + href;
                     }
                 }
+                
                 if (!href.startsWith("https")) {
                     if (href.startsWith("/")) {
                         href = baseUrl + href;
@@ -43,10 +43,12 @@ async function searchResults(keyword) {
                         href = baseUrl + "/" + href;
                     }
                 }
+                
+                // CORREZIONE: Rimosso il blocco che scartava i Film. Ora vengono inclusi!
                 results.push({
-                title: title.trim(),
-                image: imageUrl,
-                href: href,
+                    title: title.trim(),
+                    image: imageUrl,
+                    href: href,
                 });
             }
         });
@@ -54,6 +56,68 @@ async function searchResults(keyword) {
         return JSON.stringify(results);
     } catch (error) {
         console.log("Search error:", error);
+        return JSON.stringify([]);
+    }
+}
+
+async function extractEpisodes(url) {
+    try {
+        const response = await soraFetch(url);
+        const html = await response.text();
+        
+        const episodes = [];
+        const baseUrl = "https://www.animeworld.ac";
+        
+        // Verifichiamo se la pagina contiene i link degli episodi standard
+        const regex = /<a[^>]+data-episode-num="(\d+)"[^>]+href="([^"]+)"/g;
+        let match;
+        
+        while ((match = regex.exec(html)) !== null) {
+            const number = parseInt(match[1], 10);
+            let href = match[2];
+            
+            if (!href.startsWith("https")) {
+                if (href.startsWith("/")) {
+                    href = baseUrl + href;
+                } else {
+                    href = baseUrl + "/" + href;
+                }
+            }
+            
+            episodes.push({
+                href: href,
+                number: number,
+            });
+        }
+        
+        // CORREZIONE PER I FILM: Se la regex sopra non trova episodi, significa che è un Film o OAV singolo.
+        // Estraiamo l'ID dell'episodio direttamente dalla variabile del player di AnimeWorld (window.animeId o simili)
+        if (episodes.length === 0) {
+            // Cerchiamo l'ID dell'episodio unico nell'HTML (es. data-id="..." nei widget del server attivo)
+            const idMatch = html.match(/data-id="(\d+)"[^>]*class="[^"]*server[^"]*"/) || 
+                            html.match(/data-episode-id="(\d+)"/) ||
+                            html.match(/window\.animeId\s*=\s*(\d+)/);
+                            
+            if (idMatch) {
+                // Generiamo l'URL finto o diretto dell'episodio che l'app userà per fare l'estrazione video
+                episodes.push({
+                    href: `${baseUrl}/play/${idMatch[1]}`, // Passiamo l'ID pulito per la riproduzione diretta
+                    number: 1
+                });
+                sendLog("Rilevato Film. Generato link video con ID: " + idMatch[1]);
+            } else {
+                // Fallback estremo: usa l'URL della scheda stessa
+                episodes.push({
+                    href: url,
+                    number: 1
+                });
+            }
+        }
+        
+        episodes.sort((a, b) => a.number - b.number);
+        return JSON.stringify(episodes);
+    } catch (error) {
+        console.log("Episodes error:", error);
         return JSON.stringify([]);
     }
 }
