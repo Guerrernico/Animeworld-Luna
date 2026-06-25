@@ -3,80 +3,58 @@ async function searchResults(keyword) {
     const baseUrl = "https://animeworld.ac";
     
     try {
-        // Usiamo /filter invece di /search. Questo endpoint costringe il server
-        // a restituire la struttura standard ad elenco (film-list) in modo pulito.
-        const response = await soraFetch(`${baseUrl}/filter?keyword=${encodeURIComponent(keyword)}`);
+        const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
         const html = await response.text();
         
-        // Regex ultra-flessibile: intercetta l'elemento a prescindere da quanti spazi 
-        // o attributi extra (come data-id, data-jtitle) i programmatori del sito abbiano inserito.
-        const regex = /<div[^>]*class="item"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a[^>]*class="name"[^>]*>([\s\S]*?)<\/a>/g;
+        const filmListRegex =
+        /<div class="film-list">([\s\S]*?)<div class="clearfix"><\/div>\s*<\/div>/;
+        const filmListMatch = html.match(filmListRegex);
         
-        let match;
-        const lowerKeyword = keyword.toLowerCase().trim();
-
-        while ((match = regex.exec(html)) !== null) {
-            let href = match[1].trim();
-            let imageUrl = match[2].trim();
-            // Puliamo il titolo da eventuali tag interni o spazi strani
-            const title = match[3].replace(/<[^>]*>/g, "").trim(); 
-            const lowerTitle = title.toLowerCase();
-
-            // Controllo di corrispondenza: la parola deve essere presente nel titolo italiano o nell'URL
-            if (!lowerTitle.includes(lowerKeyword) && !href.toLowerCase().includes(lowerKeyword)) {
-                continue; 
-            }
+        if (!filmListMatch) {
+            return JSON.stringify(results);
+        }
+        
+        const filmListContent = filmListMatch[1];
+        const itemRegex = /<div class="item">[\s\S]*?<\/div>[\s]*<\/div>/g;
+        const items = filmListContent.match(itemRegex) || [];
+        
+        items.forEach((itemHtml) => {
+            const imgMatch = itemHtml.match(/src="([^"]+)"/);
+            let imageUrl = imgMatch ? imgMatch[1] : "";
             
-            // Correzione dei link relativi
-            if (!imageUrl.startsWith("https")) {
-                imageUrl = imageUrl.startsWith("/") ? baseUrl + imageUrl : baseUrl + "/" + imageUrl;
-            }
-            if (!href.startsWith("https")) {
-                href = href.startsWith("/") ? baseUrl + href : baseUrl + "/" + href;
-            }
+            const titleMatch = itemHtml.match(/class="name">([^<]+)</);
+            const title = titleMatch ? titleMatch[1] : "";
             
-            results.push({
-                title: title,
+            const hrefMatch = itemHtml.match(/href="([^"]+)"/);
+            let href = hrefMatch ? hrefMatch[1] : "";
+            
+            if (imageUrl && title && href) {
+                if (!imageUrl.startsWith("https")) {
+                    if (imageUrl.startsWith("/")) {
+                        imageUrl = baseUrl + imageUrl;
+                    } else {
+                        imageUrl = baseUrl + "/" + href;
+                    }
+                }
+                if (!href.startsWith("https")) {
+                    if (href.startsWith("/")) {
+                        href = baseUrl + href;
+                    } else {
+                        href = baseUrl + "/" + href;
+                    }
+                }
+                results.push({
+                title: title.trim(),
                 image: imageUrl,
-                href: href
-            });
-        }
+                href: href,
+                });
+            }
+        });
         
-        // Se la ricerca con filtro non ha prodotto nulla, facciamo un fallback sulla ricerca classica
-        if (results.length === 0) {
-            console.log("Nessun risultato con /filter, provo fallback su /search...");
-            return await backupSearch(keyword, baseUrl);
-        }
-
-        console.log("Risultati trovati:", JSON.stringify(results));
+        console.log(JSON.stringify(results));
         return JSON.stringify(results);
     } catch (error) {
         console.log("Search error:", error);
-        return JSON.stringify([]);
-    }
-}
-
-// Funzione di riserva (nel caso in cui il filtro fallisca o il sito richieda /search)
-async function backupSearch(keyword, baseUrl) {
-    const results = [];
-    try {
-        const response = await soraFetch(`${baseUrl}/search?keyword=${encodeURIComponent(keyword)}`);
-        const html = await response.text();
-        const regex = /<div[^>]*class="item"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<a[^>]*class="name"[^>]*>([\s\S]*?)<\/a>/g;
-        
-        let match;
-        while ((match = regex.exec(html)) !== null) {
-            let href = match[1].trim();
-            let imageUrl = match[2].trim();
-            const title = match[3].replace(/<[^>]*>/g, "").trim();
-
-            if (!imageUrl.startsWith("https")) imageUrl = imageUrl.startsWith("/") ? baseUrl + imageUrl : baseUrl + "/" + imageUrl;
-            if (!href.startsWith("https")) href = href.startsWith("/") ? baseUrl + href : baseUrl + "/" + href;
-
-            results.push({ title, image: imageUrl, href });
-        }
-        return JSON.stringify(results);
-    } catch (e) {
         return JSON.stringify([]);
     }
 }
